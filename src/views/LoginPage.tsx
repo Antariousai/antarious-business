@@ -36,6 +36,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState<'signup' | 'login'>('signup')
   const [error, setError] = useState<string | null>(null)
+  const [checkEmail, setCheckEmail] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>(() =>
     FREYA_PERSONA.login.opener.map((text, i) => ({ id: `f${i}`, role: 'freya', text })),
   )
@@ -125,12 +126,38 @@ export function LoginPage() {
       const displayName = ownerNameRef.current || email.split('@')[0]
 
       if (mode === 'signup') {
-        const { error: signError } = await supabase.auth.signUp({
+        const appUrl =
+          process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || window.location.origin
+        const { data, error: signError } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { full_name: displayName } },
+          options: {
+            data: { full_name: displayName },
+            emailRedirectTo: `${appUrl}/auth/callback`,
+          },
         })
         if (signError) throw signError
+
+        // Confirm-email enabled → no session until they click the link.
+        if (!data.session) {
+          setCheckEmail(email.trim())
+          setSending(false)
+          const youMsg: ChatMsg = {
+            id: uid(),
+            role: 'you',
+            text: `Signed up as ${email.trim()}`,
+          }
+          const freyaMsg: ChatMsg = {
+            id: uid(),
+            role: 'freya',
+            text: `I sent a confirmation link to ${email.trim()}. Open it to verify, then come back and log in.`,
+          }
+          setMessages((prev) => {
+            handoffRef.current = [...prev, youMsg, freyaMsg]
+            return handoffRef.current
+          })
+          return
+        }
       } else {
         const { error: signError } = await supabase.auth.signInWithPassword({
           email: email.trim(),
@@ -189,7 +216,7 @@ export function LoginPage() {
                 <p className="login-support">{FREYA_PERSONA.login.status}</p>
               </div>
 
-              <div className="login-chat">
+              <div className={`login-chat${step === 'auth' ? ' login-chat--auth' : ''}`}>
                 <div className="login-chat-tail" aria-hidden />
                 <div ref={threadRef} className="login-chat-thread">
                   {messages.map((m, i) =>
@@ -252,62 +279,105 @@ export function LoginPage() {
                     )}
                   </form>
                 ) : (
-                  <form
-                    onSubmit={onAuthSubmit}
-                    className="login-chat-composer items-stretch gap-2 p-3"
-                    style={{ flexDirection: 'column', height: 'auto' }}
-                  >
+                  <form onSubmit={onAuthSubmit} className="login-chat-auth">
                     {exiting ? (
                       <p className="login-chat-handoff">Opening your workspace…</p>
                     ) : (
                       <>
-                        <div className="flex gap-2 text-[12px]">
+                        <div className="login-chat-auth-modes" role="tablist" aria-label="Account mode">
                           <button
                             type="button"
-                            className={`rounded-full px-3 py-1 font-semibold ${mode === 'signup' ? 'bg-sky text-white' : 'bg-slate-100 text-slate-600'}`}
-                            onClick={() => setMode('signup')}
+                            role="tab"
+                            aria-selected={mode === 'signup'}
+                            className={`login-chat-auth-mode${mode === 'signup' ? ' is-active' : ''}`}
+                            onClick={() => {
+                              setMode('signup')
+                              setCheckEmail(null)
+                              setError(null)
+                            }}
                           >
                             Sign up
                           </button>
                           <button
                             type="button"
-                            className={`rounded-full px-3 py-1 font-semibold ${mode === 'login' ? 'bg-sky text-white' : 'bg-slate-100 text-slate-600'}`}
-                            onClick={() => setMode('login')}
+                            role="tab"
+                            aria-selected={mode === 'login'}
+                            className={`login-chat-auth-mode${mode === 'login' ? ' is-active' : ''}`}
+                            onClick={() => {
+                              setMode('login')
+                              setCheckEmail(null)
+                              setError(null)
+                            }}
                           >
                             Log in
                           </button>
                         </div>
-                        <input
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          onFocus={() => setInputFocused(true)}
-                          onBlur={() => setInputFocused(false)}
-                          placeholder="you@business.com"
-                          autoFocus
-                          disabled={sending}
-                          className="login-chat-input w-full"
-                        />
-                        <div className="flex gap-2">
-                          <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            onKeyDown={onKeyDown}
-                            placeholder="Password (6+ chars)"
-                            disabled={sending}
-                            className="login-chat-input min-w-0 flex-1"
-                          />
-                          <button
-                            type="submit"
-                            disabled={!email.trim() || password.length < 6 || sending}
-                            className="login-chat-send"
-                            aria-label={mode === 'signup' ? 'Create account' : 'Log in'}
-                          >
-                            <ArrowUp className="h-5 w-5" strokeWidth={2.5} />
-                          </button>
-                        </div>
-                        {error && <p className="text-[12px] text-coral">{error}</p>}
+
+                        {checkEmail ? (
+                          <div className="login-chat-auth-notice">
+                            <p className="login-chat-auth-notice-title">Check your email</p>
+                            <p>
+                              We sent a confirmation link to <strong>{checkEmail}</strong>. Click it
+                              to verify, then use Log in.
+                            </p>
+                            <button
+                              type="button"
+                              className="login-chat-auth-notice-link"
+                              onClick={() => {
+                                setMode('login')
+                                setCheckEmail(null)
+                              }}
+                            >
+                              Go to log in →
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <label className="login-chat-auth-field">
+                              <span>Email</span>
+                              <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                onFocus={() => setInputFocused(true)}
+                                onBlur={() => setInputFocused(false)}
+                                placeholder="you@business.com"
+                                autoComplete="email"
+                                autoFocus
+                                disabled={sending}
+                                className="login-chat-auth-input"
+                              />
+                            </label>
+                            <label className="login-chat-auth-field">
+                              <span>Password</span>
+                              <input
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                onKeyDown={onKeyDown}
+                                placeholder="At least 6 characters"
+                                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                                disabled={sending}
+                                className="login-chat-auth-input"
+                              />
+                            </label>
+                            <button
+                              type="submit"
+                              disabled={!email.trim() || password.length < 6 || sending}
+                              className="login-chat-auth-submit"
+                            >
+                              {sending
+                                ? mode === 'signup'
+                                  ? 'Creating account…'
+                                  : 'Signing in…'
+                                : mode === 'signup'
+                                  ? 'Create account'
+                                  : 'Log in'}
+                            </button>
+                          </>
+                        )}
+
+                        {error ? <p className="login-chat-auth-error">{error}</p> : null}
                       </>
                     )}
                   </form>
