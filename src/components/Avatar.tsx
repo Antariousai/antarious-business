@@ -1,13 +1,16 @@
 const COLORS: Record<string, string> = {
-  F: '#38bdf8',
-  J: '#64748b',
-  S: '#3b82f6',
-  P: '#8b5cf6',
-  E: '#f97316',
-  A: '#1e40af',
-  D: '#ec4899',
-  O: '#ea580c',
-  M: '#0ea5e9',
+  F: '#38bdf8', // sky
+  N: '#0284c7', // sky-bright
+  J: '#5b6b7c', // muted
+  S: '#34d399', // mint
+  P: '#fdba74', // peach
+  E: '#fbbf24', // sunshine
+  A: '#0f1724', // navy
+  D: '#fb7185', // coral
+  O: '#fb923c', // orange/peach
+  M: '#0ea5e9', // sky
+  R: '#14b8a6', // teal
+  F2: '#7dd3fc',
 }
 
 export function Avatar({
@@ -21,7 +24,8 @@ export function Avatar({
   online?: boolean
   color?: string
 }) {
-  const bg = color || COLORS[letter.toUpperCase()] || '#38bdf8'
+  const key = letter.toUpperCase()
+  const bg = color || COLORS[key] || '#38bdf8'
   const fontSize = Math.round(size * 0.42)
 
   return (

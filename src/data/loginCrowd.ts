@@ -23,7 +23,7 @@ const LEFT_SIZES: TileSize[] = [
 
 const ACCENTS: TileAccent[] = ['sky', 'mint', 'coral', 'sunshine']
 
-/** People representing the work — bakers, baristas, stylists, shop owners… */
+/** People representing the work — stylists, shop owners, freelancers… */
 const PEOPLE = [
   'photo-1556910103-1c02745aae4d',
   'photo-1577219491135-ce391730fb2c',

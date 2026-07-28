@@ -1,30 +1,35 @@
 {
   "name": "antarious-v2",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "0.1.0",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "build:freya-gifs": "python scripts/build-freya-gifs.py",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "build:freya-gifs": "python scripts/build-freya-gifs.py",
+    "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
+    "db:reset": "supabase db reset"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.20",
+    "@supabase/ssr": "^0.12.3",
+    "@supabase/supabase-js": "^2.49.0",
+    "ai": "^7.0.37",
     "lucide-react": "^1.24.0",
+    "next": "^15.5.22",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.2",
+    "@tailwindcss/postcss": "^4.3.2",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
     "oxlint": "^1.71.0",
+    "postcss": "^8.5.0",
     "tailwindcss": "^4.3.2",
-    "typescript": "~6.0.2",
-    "vite": "^8.1.1"
+    "typescript": "^5.9.2"
   }
 }

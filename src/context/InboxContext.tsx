@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -12,8 +13,11 @@ import {
   type InboxMessage,
   type InboxThread,
 } from '../data/inboxData'
+import { apiFetch } from '@/lib/backend/api'
+import { mapApiMessage, mapApiThread } from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
 
-const STORAGE_KEY = 'antarious-inbox-v1'
+const STORAGE_KEY = 'antarious-inbox-v2-bd'
 
 function load(): InboxThread[] {
   try {
@@ -45,23 +49,68 @@ interface InboxContextValue {
   sendReply: (threadId: string, text: string) => void
   askFreyaDraft: (threadId: string) => void
   approveAllDrafts: () => number
+  refresh: () => Promise<void>
 }
 
 const InboxContext = createContext<InboxContextValue | null>(null)
 
 export function InboxProvider({ children }: { children: ReactNode }) {
-  const initial = load()
-  const [threads, setThreads] = useState<InboxThread[]>(initial)
-  const [activeId, setActiveIdState] = useState<string | null>(initial[0]?.id ?? null)
+  const { backend, ready } = useBackendMode()
+  const [threads, setThreads] = useState<InboxThread[]>([])
+  const [activeId, setActiveIdState] = useState<string | null>(null)
   const [channelFilter, setChannelFilter] = useState<InboxChannel | 'all'>('all')
+
+  const loadMessagesForThread = useCallback(async (threadId: string) => {
+    const data = await apiFetch<{ messages: Parameters<typeof mapApiMessage>[0][] }>(
+      `/api/inbox/messages?threadId=${encodeURIComponent(threadId)}`,
+    )
+    return (data.messages ?? []).map(mapApiMessage)
+  }, [])
+
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const data = await apiFetch<{ threads: Parameters<typeof mapApiThread>[0][] }>(
+      '/api/inbox/threads',
+    )
+    const base = data.threads ?? []
+    const withMessages = await Promise.all(
+      base.map(async (row) => {
+        try {
+          const messages = await loadMessagesForThread(row.id)
+          return mapApiThread(row, messages)
+        } catch {
+          return mapApiThread(row, [])
+        }
+      }),
+    )
+    setThreads(withMessages)
+    setActiveIdState((cur) => cur ?? withMessages[0]?.id ?? null)
+  }, [backend, loadMessagesForThread])
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      const initial = load()
+      setThreads(initial)
+      setActiveIdState(initial[0]?.id ?? null)
+      return
+    }
+    let cancelled = false
+    void refresh().catch(() => {
+      if (!cancelled) setThreads([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
 
   const persist = useCallback((updater: (prev: InboxThread[]) => InboxThread[]) => {
     setThreads((prev) => {
       const next = updater(prev)
-      save(next)
+      if (!backend) save(next)
       return next
     })
-  }, [])
+  }, [backend])
 
   const setActiveId = useCallback(
     (id: string) => {
@@ -73,6 +122,13 @@ export function InboxProvider({ children }: { children: ReactNode }) {
 
   const approveDraft = useCallback(
     (threadId: string, messageId: string) => {
+      if (backend) {
+        void apiFetch('/api/inbox/messages', {
+          method: 'PATCH',
+          body: JSON.stringify({ id: messageId, action: 'approve' }),
+        }).then(() => refresh())
+        return
+      }
       persist((prev) =>
         prev.map((t) => {
           if (t.id !== threadId) return t
@@ -90,11 +146,18 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const updateDraft = useCallback(
     (threadId: string, messageId: string, text: string) => {
+      if (backend) {
+        void apiFetch('/api/inbox/messages', {
+          method: 'PATCH',
+          body: JSON.stringify({ id: messageId, action: 'update', body: text }),
+        }).then(() => refresh())
+        return
+      }
       persist((prev) =>
         prev.map((t) => {
           if (t.id !== threadId) return t
@@ -105,11 +168,18 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const discardDraft = useCallback(
     (threadId: string, messageId: string) => {
+      if (backend) {
+        void apiFetch('/api/inbox/messages', {
+          method: 'PATCH',
+          body: JSON.stringify({ id: messageId, action: 'discard' }),
+        }).then(() => refresh())
+        return
+      }
       persist((prev) =>
         prev.map((t) => {
           if (t.id !== threadId) return t
@@ -122,13 +192,20 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const sendReply = useCallback(
     (threadId: string, text: string) => {
       const trimmed = text.trim()
       if (!trimmed) return
+      if (backend) {
+        void apiFetch('/api/inbox/messages', {
+          method: 'POST',
+          body: JSON.stringify({ threadId, body: trimmed, kind: 'you' }),
+        }).then(() => refresh())
+        return
+      }
       const msg: InboxMessage = {
         id: `m${Date.now()}`,
         kind: 'you',
@@ -149,11 +226,26 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const approveAllDrafts = useCallback(() => {
     let count = 0
+    if (backend) {
+      const drafts = threads.flatMap((t) =>
+        t.messages.filter((m) => m.kind === 'freya-draft').map((m) => m.id),
+      )
+      count = drafts.length
+      void Promise.all(
+        drafts.map((id) =>
+          apiFetch('/api/inbox/messages', {
+            method: 'PATCH',
+            body: JSON.stringify({ id, action: 'approve' }),
+          }),
+        ),
+      ).then(() => refresh())
+      return count
+    }
     persist((prev) =>
       prev.map((t) => {
         const draft = t.messages.find((m) => m.kind === 'freya-draft')
@@ -172,10 +264,21 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       }),
     )
     return count
-  }, [persist])
+  }, [backend, persist, refresh, threads])
 
   const askFreyaDraft = useCallback(
     (threadId: string) => {
+      if (backend) {
+        void apiFetch('/api/inbox/messages', {
+          method: 'POST',
+          body: JSON.stringify({
+            threadId,
+            kind: 'freya_draft',
+            body: `Thanks for reaching out! Happy to help with that — want a few options, or shall I suggest the best fit?`,
+          }),
+        }).then(() => refresh())
+        return
+      }
       persist((prev) =>
         prev.map((t) => {
           if (t.id !== threadId) return t
@@ -190,7 +293,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const filteredThreads = useMemo(() => {
@@ -217,6 +320,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       sendReply,
       askFreyaDraft,
       approveAllDrafts,
+      refresh,
     }),
     [
       threads,
@@ -232,6 +336,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       sendReply,
       askFreyaDraft,
       approveAllDrafts,
+      refresh,
     ],
   )
 

@@ -2,9 +2,11 @@ import { useRef, useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
 import { FreyaCampaignReview, type FreyaCampaignSection } from './FreyaCampaignReview'
+import { PlatformIcon } from './PlatformIcon'
 import { PLATFORM_OPTIONS, type Campaign, type Platform } from '../data/mockData'
+import { useApp } from '../context/AppContext'
 import { useCampaigns, campaignToFormInput, type NewCampaignInput } from '../context/CampaignsContext'
-import { freyaFillCampaign } from '../lib/freyaCreationHelpers'
+import { freyaFillCampaign, type FreyaBizContext } from '../lib/freyaCreationHelpers'
 
 const OBJECTIVES = ['Foot traffic', 'Awareness', 'Lead gen', 'Retention', 'Sales']
 const TONES = ['Warm, local, inviting', 'Excited & playful', 'Professional & reliable', 'Grateful & friendly']
@@ -20,6 +22,15 @@ export function CreateCampaignModal({
   campaign?: Campaign
 }) {
   const isEdit = Boolean(campaign)
+  const { profile, prefs } = useApp()
+  const bizCtx: FreyaBizContext = {
+    businessName: profile?.businessName,
+    industry: profile?.industry,
+    customers: profile?.customers,
+    goals: profile?.goals,
+    platforms: profile?.platforms?.length ? profile.platforms : prefs.connectedPlatforms,
+    tone: prefs.tone,
+  }
   const initial = campaign ? campaignToFormInput(campaign) : null
   const { createCampaign, updateCampaign, launch } = useCampaigns()
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -29,7 +40,10 @@ export function CreateCampaignModal({
   const [goal, setGoal] = useState(initial?.goal ?? '')
   const [audience, setAudience] = useState(initial?.audience ?? '')
   const [budget, setBudget] = useState(initial?.budget ?? '200')
-  const [platforms, setPlatforms] = useState<Platform[]>(initial?.platforms ?? ['Instagram', 'Facebook'])
+  const [platforms, setPlatforms] = useState<Platform[]>(
+    initial?.platforms ??
+      (bizCtx.platforms?.length ? bizCtx.platforms.slice(0, 2) : ['Instagram', 'Facebook']),
+  )
   const [objective, setObjective] = useState(initial?.objective ?? 'Foot traffic')
   const [tone, setTone] = useState(initial?.tone ?? TONES[0])
   const [freyaDrafted, setFreyaDrafted] = useState(false)
@@ -47,7 +61,7 @@ export function CreateCampaignModal({
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
-      const filled = freyaFillCampaign(prompt)
+      const filled = freyaFillCampaign(prompt, bizCtx)
       setTitle(filled.title)
       setGoal(filled.goal)
       setAudience(filled.audience)
@@ -111,14 +125,19 @@ export function CreateCampaignModal({
 
     setBuilding(true)
     window.setTimeout(() => {
-      if (isEdit && campaign) {
-        updateCampaign(campaign.id, input)
-      } else {
-        const created = createCampaign(input)
-        onCreated?.(created.id)
-      }
-      setBuilding(false)
-      onClose()
+      void (async () => {
+        try {
+          if (isEdit && campaign) {
+            await Promise.resolve(updateCampaign(campaign.id, input))
+          } else {
+            const created = await Promise.resolve(createCampaign(input))
+            onCreated?.(created.id)
+          }
+          onClose()
+        } finally {
+          setBuilding(false)
+        }
+      })()
     }, 700)
   }
 
@@ -137,15 +156,20 @@ export function CreateCampaignModal({
 
     setBuilding(true)
     window.setTimeout(() => {
-      if (isEdit && campaign) {
-        updateCampaign(campaign.id, input, { republish: true })
-      } else {
-        const created = createCampaign(input)
-        launch(created.id)
-        onCreated?.(created.id)
-      }
-      setBuilding(false)
-      onClose()
+      void (async () => {
+        try {
+          if (isEdit && campaign) {
+            await Promise.resolve(updateCampaign(campaign.id, input, { republish: true }))
+          } else {
+            const created = await Promise.resolve(createCampaign(input))
+            launch(created.id)
+            onCreated?.(created.id)
+          }
+          onClose()
+        } finally {
+          setBuilding(false)
+        }
+      })()
     }, 700)
   }
 
@@ -200,8 +224,8 @@ export function CreateCampaignModal({
             }
             placeholder={
               isEdit
-                ? 'e.g. Shift focus to corporate catering — LinkedIn + higher budget'
-                : 'e.g. Drive weekend foot traffic with a cozy bakery promo on Instagram & Facebook'
+                ? 'e.g. Shift toward wholesale buyers — Facebook + Messenger, clearer B2B offer'
+                : 'e.g. Get more weekend customers for our new offer on Instagram & Facebook'
             }
           />
 
@@ -281,12 +305,13 @@ export function CreateCampaignModal({
                         key={p}
                         type="button"
                         onClick={() => togglePlatform(p)}
-                        className={`rounded-full border px-4 py-2 text-[13px] font-semibold ${
+                        className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-semibold ${
                           on
                             ? 'border-sky bg-sky-soft text-sky-bright'
                             : 'border-slate-200 text-slate-600'
                         }`}
                       >
+                        <PlatformIcon platform={p} size={15} />
                         {p}
                       </button>
                     )

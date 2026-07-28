@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -13,8 +14,12 @@ import {
   type LeadStage,
   type LeadTemp,
 } from '../data/leadsData'
+import { apiFetch } from '@/lib/backend/api'
+import { mapApiLead } from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { hasSupabaseEnv } from '@/lib/backend/mode'
 
-const STORAGE_KEY = 'antarious-leads-v1'
+const STORAGE_KEY = 'antarious-leads-v2-bd'
 
 interface StoredLeads {
   leads: Lead[]
@@ -53,21 +58,51 @@ interface LeadsContextValue {
   clearSelection: () => void
   moveLead: (id: string, stage: LeadStage) => void
   moveSelected: (stage: LeadStage) => void
-  addLead: (input: AddLeadInput) => Lead
-  updateLead: (id: string, patch: Partial<Lead>) => void
-  removeLeads: (ids: string[]) => void
+  addLead: (input: AddLeadInput) => Lead | Promise<Lead>
+  updateLead: (id: string, patch: Partial<Lead>) => void | Promise<void>
+  removeLeads: (ids: string[]) => void | Promise<void>
+  refresh: () => Promise<void>
 }
 
 const LeadsContext = createContext<LeadsContextValue | null>(null)
 
 export function LeadsProvider({ children }: { children: ReactNode }) {
-  const [leads, setLeads] = useState<Lead[]>(() => load())
+  const { backend, ready } = useBackendMode()
+  const [leads, setLeads] = useState<Lead[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  const persist = useCallback((nextLeads: Lead[]) => {
-    setLeads(nextLeads)
-    save(nextLeads)
-  }, [])
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const data = await apiFetch<{ leads: Parameters<typeof mapApiLead>[0][] }>('/api/leads')
+    setLeads((data.leads ?? []).map((row, i) => mapApiLead(row, i)))
+  }, [backend])
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      if (hasSupabaseEnv()) {
+        setLeads([])
+        return
+      }
+      setLeads(load())
+      return
+    }
+    let cancelled = false
+    void refresh().catch(() => {
+      if (!cancelled) setLeads([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
+
+  const persist = useCallback(
+    (nextLeads: Lead[]) => {
+      setLeads(nextLeads)
+      if (!backend) save(nextLeads)
+    },
+    [backend],
+  )
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -82,22 +117,69 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
 
   const moveLead = useCallback(
     (id: string, stage: LeadStage) => {
+      if (backend) {
+        void apiFetch('/api/leads', {
+          method: 'PATCH',
+          body: JSON.stringify({ id, stage }),
+        }).then(() => refresh())
+        setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, stage } : l)))
+        return
+      }
       persist(leads.map((l) => (l.id === id ? { ...l, stage } : l)))
     },
-    [leads, persist],
+    [backend, leads, persist, refresh],
   )
 
   const moveSelected = useCallback(
     (stage: LeadStage) => {
       if (!selectedIds.size) return
+      if (backend) {
+        const ids = [...selectedIds]
+        void Promise.all(
+          ids.map((id) =>
+            apiFetch('/api/leads', {
+              method: 'PATCH',
+              body: JSON.stringify({ id, stage }),
+            }),
+          ),
+        ).then(() => refresh())
+        setLeads((prev) => prev.map((l) => (selectedIds.has(l.id) ? { ...l, stage } : l)))
+        clearSelection()
+        return
+      }
       persist(leads.map((l) => (selectedIds.has(l.id) ? { ...l, stage } : l)))
       clearSelection()
     },
-    [selectedIds, leads, persist, clearSelection],
+    [backend, selectedIds, leads, persist, clearSelection, refresh],
   )
 
   const addLead = useCallback(
-    (input: AddLeadInput) => {
+    async (input: AddLeadInput): Promise<Lead> => {
+      if (backend) {
+        const data = await apiFetch<{ lead: Parameters<typeof mapApiLead>[0] }>('/api/leads', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: input.name.trim(),
+            email: input.email.trim() || null,
+            company: (input.company || '').trim() || null,
+            notes: (input.note || '').trim() || null,
+            temperature: input.temp || 'warm',
+            source: input.source || 'manual',
+            stage: 'new',
+            tags: input.tags?.length ? input.tags : ['Local'],
+          }),
+        })
+        const lead = mapApiLead(
+          {
+            ...data.lead,
+            lead_tags: (input.tags?.length ? input.tags : ['Local']).map((tag) => ({ tag })),
+          },
+          leads.length,
+        )
+        setLeads((prev) => [lead, ...prev])
+        return lead
+      }
+
       const lead: Lead = {
         id: `l${Date.now()}`,
         name: input.name.trim(),
@@ -115,23 +197,46 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       persist([lead, ...leads])
       return lead
     },
-    [leads, persist],
+    [backend, leads, persist],
   )
 
   const updateLead = useCallback(
-    (id: string, patch: Partial<Lead>) => {
+    async (id: string, patch: Partial<Lead>) => {
+      if (backend) {
+        const body: Record<string, unknown> = { id }
+        if (patch.name != null) body.name = patch.name
+        if (patch.company != null) body.company = patch.company
+        if (patch.email != null) body.email = patch.email
+        if (patch.note != null) body.notes = patch.note
+        if (patch.stage != null) body.stage = patch.stage
+        if (patch.temp != null) body.temperature = patch.temp
+        if (patch.source != null) body.source = patch.source
+        await apiFetch('/api/leads', { method: 'PATCH', body: JSON.stringify(body) })
+        await refresh()
+        return
+      }
       persist(leads.map((l) => (l.id === id ? { ...l, ...patch } : l)))
     },
-    [leads, persist],
+    [backend, leads, persist, refresh],
   )
 
   const removeLeads = useCallback(
-    (ids: string[]) => {
+    async (ids: string[]) => {
       const set = new Set(ids)
+      if (backend) {
+        await Promise.all(
+          ids.map((id) =>
+            apiFetch(`/api/leads?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+          ),
+        )
+        setLeads((prev) => prev.filter((l) => !set.has(l.id)))
+        clearSelection()
+        return
+      }
       persist(leads.filter((l) => !set.has(l.id)))
       clearSelection()
     },
-    [leads, persist, clearSelection],
+    [backend, leads, persist, clearSelection],
   )
 
   const value = useMemo(
@@ -145,6 +250,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       addLead,
       updateLead,
       removeLeads,
+      refresh,
     }),
     [
       leads,
@@ -156,6 +262,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       addLead,
       updateLead,
       removeLeads,
+      refresh,
     ],
   )
 

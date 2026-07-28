@@ -34,7 +34,7 @@ export function FreyaCreationAssist({
   }, [showAdvanced, leaveToFreya, onLeaveToFreyaChange])
 
   return (
-    <div className="rounded-2xl border border-sky/25 bg-gradient-to-br from-sky-soft/90 via-white to-violet-50/60 p-4 shadow-sm shadow-sky/5">
+    <div className="rounded-2xl border border-sky/25 bg-gradient-to-br from-sky-soft/90 via-white to-sky-soft/60 p-4 shadow-sm shadow-sky/5">
       <div className="mb-3 flex items-center gap-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sky/15 text-sky">
           <Sparkles className="h-4 w-4" />

@@ -1,4 +1,6 @@
 import { Loader2, Pencil, RefreshCw, Sparkles } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { PlatformIcon } from './PlatformIcon'
 
 export type FreyaDraftSection = 'platforms' | 'caption' | 'tag' | 'schedule' | 'all'
 
@@ -7,20 +9,24 @@ function ReviewRow({
   value,
   empty = 'Not set',
   onEdit,
+  children,
 }: {
   label: string
-  value: string
+  value?: string
   empty?: string
   onEdit: () => void
+  children?: ReactNode
 }) {
-  const display = value.trim() || empty
+  const display = (value ?? '').trim() || empty
   return (
     <div className="flex items-start justify-between gap-3 rounded-xl border border-white/80 bg-white/90 px-3.5 py-3 shadow-sm">
       <div className="min-w-0 flex-1">
         <p className="text-[11px] font-bold tracking-wide text-sky uppercase">{label}</p>
-        <p className={`mt-1 text-[13px] leading-relaxed ${value.trim() ? 'text-ink' : 'text-muted italic'}`}>
-          {display}
-        </p>
+        {children ?? (
+          <p className={`mt-1 text-[13px] leading-relaxed ${(value ?? '').trim() ? 'text-ink' : 'text-muted italic'}`}>
+            {display}
+          </p>
+        )}
       </div>
       <button
         type="button"
@@ -52,7 +58,7 @@ export function FreyaDraftReview({
   regenerating?: boolean
 }) {
   return (
-    <div className="space-y-3 rounded-2xl border-2 border-sky/30 bg-gradient-to-br from-sky-soft/70 via-white to-violet-50/40 p-4 shadow-sm shadow-sky/10">
+    <div className="space-y-3 rounded-2xl border-2 border-sky/30 bg-gradient-to-br from-sky-soft/70 via-white to-sky-soft/40 p-4 shadow-sm shadow-sky/10">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-sky/15 text-sky">
@@ -82,10 +88,25 @@ export function FreyaDraftReview({
 
       <ReviewRow
         label="Platforms"
-        value={platforms.join(', ')}
         empty="No platforms selected"
         onEdit={() => onEdit('platforms')}
-      />
+      >
+        {platforms.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {platforms.map((p) => (
+              <span
+                key={p}
+                className="inline-flex items-center gap-1.5 rounded-full bg-sky-soft/60 px-2.5 py-1 text-[12px] font-semibold text-ink ring-1 ring-sky/20"
+              >
+                <PlatformIcon platform={p} size={13} />
+                {p}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-1 text-[13px] leading-relaxed text-muted italic">No platforms selected</p>
+        )}
+      </ReviewRow>
       <ReviewRow label="Caption" value={caption} empty="No caption yet" onEdit={() => onEdit('caption')} />
       <ReviewRow label="Tag" value={tag} onEdit={() => onEdit('tag')} />
       <ReviewRow

@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { Film, ImagePlus, Upload, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
 import { FreyaDraftReview, type FreyaDraftSection } from './FreyaDraftReview'
+import { PlatformIcon } from './PlatformIcon'
 import { PLATFORM_OPTIONS, type ContentPost, type Platform } from '../data/mockData'
+import { useApp } from '../context/AppContext'
 import { postPlatforms, type SavePostInput, useContent } from '../context/ContentContext'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { uploadPostMedia } from '@/lib/mediaUpload'
 import {
   freyaDraftCaption,
   freyaPickPlatforms,
   freyaPickPostTag,
+  type FreyaBizContext,
 } from '../lib/freyaCreationHelpers'
 
 const TAGS = ['Food', 'Product', 'Lifestyle', 'Coffee']
@@ -17,6 +23,9 @@ type UploadedFile = {
   url: string
   name: string
   kind: 'image' | 'video' | 'other'
+  file?: File
+  path?: string
+  mimeType?: string
 }
 
 function fileKind(file: File): UploadedFile['kind'] {
@@ -49,6 +58,18 @@ export function CreatePostModal({
   initialLeaveToFreya?: boolean
 }) {
   const { createPost, updatePost } = useContent()
+  const { prefs, profile } = useApp()
+  const { backend } = useBackendMode()
+  const bizCtx: FreyaBizContext = {
+    businessName: profile?.businessName,
+    industry: profile?.industry,
+    customers: profile?.customers,
+    goals: profile?.goals,
+    platforms: profile?.platforms?.length ? profile.platforms : prefs.connectedPlatforms,
+    tone: prefs.tone,
+  }
+  const connectedPlatforms = prefs.connectedPlatforms
+  const hasConnectedPlatform = connectedPlatforms.length > 0
   const isEdit = Boolean(post)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadsRef = useRef<UploadedFile[]>([])
@@ -56,13 +77,15 @@ export function CreatePostModal({
 
   const [prompt, setPrompt] = useState(initialPrompt)
   const [leaveToFreya, setLeaveToFreya] = useState(isEdit ? false : initialLeaveToFreya)
-  const [platforms, setPlatforms] = useState<Platform[]>(
-    post ? postPlatforms(post) : ['Instagram'],
-  )
+  const [platforms, setPlatforms] = useState<Platform[]>(() => {
+    if (post) return postPlatforms(post)
+    if (connectedPlatforms.length) return [connectedPlatforms[0]!]
+    if (bizCtx.platforms?.length) return [bizCtx.platforms[0]!]
+    return []
+  })
   const [caption, setCaption] = useState(post?.caption ?? initialCaption)
   const [tag, setTag] = useState(post?.tag ?? 'Food')
   const [schedule, setSchedule] = useState(post?.scheduledAt ?? '')
-  const [existingImage] = useState(post?.image ?? '')
   const [uploads, setUploads] = useState<UploadedFile[]>(
     post?.image
       ? [{ id: 'existing', url: post.image, name: 'Current media', kind: 'image' as const }]
@@ -72,6 +95,8 @@ export function CreatePostModal({
   const [showManualEditor, setShowManualEditor] = useState(isEdit)
   const [applying, setApplying] = useState(false)
   const [building, setBuilding] = useState(false)
+  const [mediaError, setMediaError] = useState<string | null>(null)
+  const [mediaChanged, setMediaChanged] = useState(false)
 
   uploadsRef.current = uploads
 
@@ -87,9 +112,9 @@ export function CreatePostModal({
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
-      setCaption(freyaDraftCaption(prompt, initialCaption || post?.caption || undefined))
+      setCaption(freyaDraftCaption(prompt, initialCaption || post?.caption || undefined, bizCtx))
       setTag(freyaPickPostTag(prompt))
-      setPlatforms(freyaPickPlatforms(prompt))
+      setPlatforms(freyaPickPlatforms(prompt, bizCtx))
       setFreyaDrafted(true)
       setShowManualEditor(false)
       setApplying(false)
@@ -123,23 +148,39 @@ export function CreatePostModal({
 
   function togglePlatform(p: Platform) {
     setPlatforms((prev) =>
-      prev.includes(p) ? (prev.length > 1 ? prev.filter((x) => x !== p) : prev) : [...prev, p],
+      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
     )
   }
 
   async function addFiles(fileList: FileList | null) {
     if (!fileList?.length) return
+    setMediaError(null)
     const next: UploadedFile[] = []
     for (const file of Array.from(fileList)) {
-      const url = file.type.startsWith('image/') ? await readFileAsDataUrl(file) : URL.createObjectURL(file)
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        setMediaError('Only images and videos are supported.')
+        continue
+      }
+      if (file.size > 25 * 1024 * 1024) {
+        setMediaError(`“${file.name}” is over 25MB.`)
+        continue
+      }
+      const url = file.type.startsWith('image/')
+        ? await readFileAsDataUrl(file)
+        : URL.createObjectURL(file)
       next.push({
         id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
         url,
         name: file.name,
         kind: fileKind(file),
+        file,
+        mimeType: file.type,
       })
     }
-    setUploads((prev) => [...prev, ...next])
+    if (next.length) {
+      setUploads((prev) => [...prev, ...next])
+      setMediaChanged(true)
+    }
   }
 
   function removeUpload(id: string) {
@@ -148,10 +189,36 @@ export function CreatePostModal({
       if (target?.url.startsWith('blob:')) URL.revokeObjectURL(target.url)
       return prev.filter((u) => u.id !== id)
     })
+    setMediaChanged(true)
+    setMediaError(null)
   }
 
-  function buildInput(status: ContentPost['status']): SavePostInput {
-    const image = uploads[0]?.url || existingImage
+  async function resolveAssets(): Promise<SavePostInput['assets']> {
+    if (!backend) return undefined
+    if (!mediaChanged && isEdit) return undefined
+
+    const assets: NonNullable<SavePostInput['assets']> = []
+    for (const item of uploads) {
+      if (item.path) {
+        assets.push({ path: item.path, mimeType: item.mimeType, url: item.url })
+        continue
+      }
+      if (!item.file) continue
+      const uploaded = await uploadPostMedia(item.file)
+      assets.push({
+        path: uploaded.path,
+        mimeType: uploaded.mimeType,
+        url: uploaded.url,
+      })
+    }
+    return assets
+  }
+
+  function buildInput(
+    status: ContentPost['status'],
+    assets?: SavePostInput['assets'],
+  ): SavePostInput {
+    const image = assets?.[0]?.url || uploads[0]?.url || ''
     return {
       platforms,
       caption: caption.trim(),
@@ -160,10 +227,11 @@ export function CreatePostModal({
       status,
       scheduledAt: schedule || undefined,
       author: post?.author ?? 'You',
+      assets,
     }
   }
 
-  function handleSubmit(action: 'save' | 'publish') {
+  async function handleSubmit(action: 'save' | 'publish') {
     if (!isEdit && leaveToFreya && !freyaDrafted && prompt.trim()) {
       runFreyaFill()
       return
@@ -177,45 +245,77 @@ export function CreatePostModal({
     let status: ContentPost['status']
     let republish = false
 
-    if (isEdit && post) {
+    // Without a connected channel, everything stays a draft.
+    if (!hasConnectedPlatform) {
+      status = 'draft'
+      republish = false
+    } else if (isEdit && post) {
       if (action === 'publish') {
         status = schedule ? 'scheduled' : 'published'
         republish = true
       } else {
-        status = post.status
+        status = post.status === 'published' || post.status === 'scheduled' ? post.status : 'draft'
       }
     } else {
       status = action === 'save' ? 'draft' : schedule ? 'scheduled' : 'published'
       republish = action === 'publish'
     }
 
+    // Publishing only to connected platforms
+    const publishPlatforms =
+      status === 'draft'
+        ? platforms
+        : platforms.filter((p) => connectedPlatforms.includes(p))
+
+    if (status !== 'draft' && publishPlatforms.length === 0) {
+      status = 'draft'
+      republish = false
+    }
+
     setBuilding(true)
-    window.setTimeout(() => {
-      const input = buildInput(status)
-      if (isEdit && post) {
-        updatePost(post.id, input, { republish })
-      } else {
-        createPost(input)
+    setMediaError(null)
+    try {
+      const assets = await resolveAssets()
+      const input = buildInput(status, assets)
+      input.platforms = status === 'draft' ? platforms : publishPlatforms
+      if (status === 'draft') {
+        input.scheduledAt = undefined
       }
-      setBuilding(false)
+      if (isEdit && post) {
+        await updatePost(post.id, input, { republish })
+      } else {
+        await createPost(input)
+      }
       onClose()
-    }, action === 'publish' ? 600 : 400)
+    } catch (err) {
+      setMediaError(err instanceof Error ? err.message : 'Could not save media. Try again.')
+    } finally {
+      setBuilding(false)
+    }
   }
 
   const busy = applying || building
   const hasCaption = caption.trim().length > 0
-  const hasMedia = uploads.length > 0 || Boolean(existingImage)
+  const hasMedia = uploads.length > 0
   const fullAutoReady = !leaveToFreya || freyaDrafted
   const canSave = hasCaption && fullAutoReady
-  const canPublish = hasCaption && platforms.length > 0 && hasMedia && fullAutoReady
+  const selectedConnected = platforms.filter((p) => connectedPlatforms.includes(p))
+  const canPublish =
+    hasConnectedPlatform &&
+    selectedConnected.length > 0 &&
+    hasCaption &&
+    hasMedia &&
+    fullAutoReady
   const isLivePost = post?.status === 'published' || post?.status === 'scheduled'
-  const publishLabel = schedule
-    ? isLivePost
-      ? 'Reschedule post'
-      : 'Schedule post'
-    : isLivePost
-      ? 'Republish Now'
-      : 'Publish Now'
+  const publishLabel = !hasConnectedPlatform
+    ? 'Connect a channel to publish'
+    : schedule
+      ? isLivePost
+        ? 'Reschedule post'
+        : 'Schedule post'
+      : isLivePost
+        ? 'Republish Now'
+        : 'Publish Now'
   const showReview = leaveToFreya && freyaDrafted && !showManualEditor
   const showManualFields = !leaveToFreya || showManualEditor
 
@@ -241,36 +341,25 @@ export function CreatePostModal({
         </div>
 
         <div className="space-y-5 px-6 py-5">
-          <FreyaCreationAssist
-            prompt={prompt}
-            onPromptChange={setPrompt}
-            leaveToFreya={leaveToFreya}
-            onLeaveToFreyaChange={handleLeaveToFreyaChange}
-            onApplyPrompt={runFreyaFill}
-            applying={applying}
-            disabled={busy}
-            applyLabel={
-              isEdit
-                ? leaveToFreya
-                  ? 'Freya, re-draft post from prompt'
-                  : 'Freya, update caption from prompt'
-                : leaveToFreya
-                  ? 'Freya, draft post from prompt'
-                  : 'Freya, write caption from prompt'
-            }
-            placeholder={
-              isEdit
-                ? 'e.g. Refresh this post — warmer tone, highlight weekend hours'
-                : 'e.g. Warm weekend post about fresh croissants & coffee — friendly, local vibe'
-            }
-          />
+          {!hasConnectedPlatform && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+              <p className="font-bold">No channel connected</p>
+              <p className="mt-1 text-[12px] leading-relaxed">
+                You can write and save drafts now. Connect Instagram, Facebook, or another channel in{' '}
+                <Link to="/app/settings" className="font-bold underline" onClick={onClose}>
+                  Settings
+                </Link>{' '}
+                to publish or schedule.
+              </p>
+            </div>
+          )}
 
-          <div>
-            <label className="mb-2 block text-[13px] font-semibold text-ink">
-              Media <span className="font-normal text-muted">(required to publish)</span>
+          <div className="rounded-2xl border border-sky/20 bg-gradient-to-br from-sky-soft/40 via-white to-amber-50/40 p-4">
+            <label className="mb-2 block text-[13px] font-bold text-ink">
+              Upload media <span className="font-normal text-muted">(images, GIFs, or video)</span>
             </label>
             <p className="mb-3 text-[12px] text-muted">
-              Upload your own images, GIFs, or video — Freya does not generate media.
+              Tap below to choose files from your device. Required to publish; optional for drafts.
             </p>
 
             <input
@@ -314,13 +403,22 @@ export function CreatePostModal({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/80 px-4 py-8 text-center transition hover:border-sky/40 hover:bg-sky-soft/30"
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  void addFiles(e.dataTransfer.files)
+                }}
+                className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-sky/40 bg-white px-4 py-10 text-center transition hover:border-sky hover:bg-sky-soft/30"
               >
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-sky/10 text-sky">
-                  <Upload className="h-5 w-5" />
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-sky/10 text-sky">
+                  <Upload className="h-6 w-6" />
                 </span>
-                <span className="text-[14px] font-semibold text-ink">Upload files</span>
-                <span className="text-[12px] text-muted">PNG, JPG, GIF, MP4, and more</span>
+                <span className="text-[15px] font-bold text-ink">Choose photos or video</span>
+                <span className="text-[12px] text-muted">or drag and drop here · PNG, JPG, GIF, MP4</span>
               </button>
             )}
 
@@ -334,7 +432,37 @@ export function CreatePostModal({
                 Add more files
               </button>
             )}
+
+            {mediaError && (
+              <p className="mt-3 rounded-xl border border-coral/30 bg-rose-50 px-3 py-2 text-[12px] font-semibold text-coral">
+                {mediaError}
+              </p>
+            )}
           </div>
+
+          <FreyaCreationAssist
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            leaveToFreya={leaveToFreya}
+            onLeaveToFreyaChange={handleLeaveToFreyaChange}
+            onApplyPrompt={runFreyaFill}
+            applying={applying}
+            disabled={busy}
+            applyLabel={
+              isEdit
+                ? leaveToFreya
+                  ? 'Freya, re-draft post from prompt'
+                  : 'Freya, update caption from prompt'
+                : leaveToFreya
+                  ? 'Freya, draft post from prompt'
+                  : 'Freya, write caption from prompt'
+            }
+            placeholder={
+              isEdit
+                ? 'e.g. Refresh this post — warmer tone, highlight weekend hours'
+                : 'e.g. Warm weekend post about new embroidered kurtis — friendly, local vibe'
+            }
+          />
 
           {leaveToFreya && !freyaDrafted && !applying && (
             <p className="rounded-xl border border-dashed border-sky/30 bg-sky-soft/30 px-4 py-3 text-[12px] text-muted">
@@ -370,23 +498,35 @@ export function CreatePostModal({
 
               <div ref={(el) => { sectionRefs.current.platforms = el }}>
                 <label className="mb-2 block text-[13px] font-semibold text-ink">
-                  Platforms <span className="font-normal text-muted">(select all that apply)</span>
+                  Platforms{' '}
+                  <span className="font-normal text-muted">
+                    {hasConnectedPlatform
+                      ? '(connected channels can publish)'
+                      : '(optional for drafts)'}
+                  </span>
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {PLATFORM_OPTIONS.map((p) => {
                     const on = platforms.includes(p)
+                    const linked = connectedPlatforms.includes(p)
                     return (
                       <button
                         key={p}
                         type="button"
                         onClick={() => togglePlatform(p)}
-                        className={`rounded-full border px-4 py-2 text-[13px] font-semibold transition ${
+                        className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-semibold transition ${
                           on
                             ? 'border-sky bg-sky-soft text-sky-bright'
                             : 'border-slate-200 text-slate-600 hover:border-slate-300'
                         }`}
                       >
+                        <PlatformIcon platform={p} size={15} />
                         {p}
+                        {linked && (
+                          <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                            linked
+                          </span>
+                        )}
                       </button>
                     )
                   })}
@@ -430,15 +570,20 @@ export function CreatePostModal({
                   type="datetime-local"
                   value={schedule}
                   onChange={(e) => setSchedule(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
+                  disabled={!hasConnectedPlatform}
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20 disabled:bg-slate-50 disabled:text-slate-400"
                 />
-                {schedule && (
+                {!hasConnectedPlatform ? (
+                  <p className="mt-1.5 text-[11px] text-muted">
+                    Scheduling unlocks after you connect a channel.
+                  </p>
+                ) : schedule ? (
                   <p className="mt-1.5 text-[11px] text-muted">
                     {isLivePost
                       ? 'Reschedule applies when you republish — Save keeps the current live time.'
                       : 'Scheduled time applies when you publish — Save draft keeps it unpublished.'}
                   </p>
-                )}
+                ) : null}
               </div>
             </>
           )}
@@ -454,7 +599,7 @@ export function CreatePostModal({
           </button>
           <button
             type="button"
-            onClick={() => handleSubmit('save')}
+            onClick={() => void handleSubmit('save')}
             disabled={!canSave || busy}
             className="rounded-full border border-sky/40 bg-white px-5 py-2.5 text-[13px] font-bold text-sky hover:bg-sky-soft disabled:border-slate-200 disabled:text-slate-400"
           >
@@ -462,7 +607,7 @@ export function CreatePostModal({
           </button>
           <button
             type="button"
-            onClick={() => handleSubmit('publish')}
+            onClick={() => void handleSubmit('publish')}
             disabled={!canPublish || busy}
             className="rounded-full bg-sky px-5 py-2.5 text-[13px] font-bold text-white hover:bg-sky-bright disabled:bg-sky-muted"
           >

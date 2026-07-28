@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -24,8 +25,17 @@ import {
   type DealStage,
   type FreyaInsight,
 } from '../data/crmData'
+import { apiFetch } from '@/lib/backend/api'
+import {
+  mapApiCrmActivity,
+  mapApiCrmCompany,
+  mapApiCrmContact,
+  mapApiCrmDeal,
+  mapApiCrmInsight,
+} from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
 
-const STORAGE_KEY = 'antarious-crm-v1'
+const STORAGE_KEY = 'antarious-crm-v2-bd'
 
 interface StoredCrm {
   deals: CrmDeal[]
@@ -113,16 +123,17 @@ interface CrmContextValue {
   selectedDealId: string | null
   selectDeal: (id: string | null) => void
   moveDeal: (id: string, stage: DealStage) => void
-  addDeal: (input: AddDealInput) => CrmDeal
-  updateDeal: (id: string, patch: Partial<CrmDeal>) => void
+  addDeal: (input: AddDealInput) => CrmDeal | Promise<CrmDeal>
+  updateDeal: (id: string, patch: Partial<CrmDeal>) => void | Promise<void>
   removeDeal: (id: string) => void
-  addContact: (input: AddContactInput) => CrmContact
+  addContact: (input: AddContactInput) => CrmContact | Promise<CrmContact>
   updateContact: (id: string, patch: Partial<CrmContact>) => void
-  addCompany: (input: AddCompanyInput) => CrmCompany
+  addCompany: (input: AddCompanyInput) => CrmCompany | Promise<CrmCompany>
   updateCompany: (id: string, patch: Partial<CrmCompany>) => void
   toggleActivity: (id: string) => void
   addActivity: (partial: Omit<CrmActivity, 'id' | 'done'> & { done?: boolean }) => void
   dismissInsight: (id: string) => void
+  refresh: () => Promise<void>
   totals: {
     openValue: number
     forecast: number
@@ -139,13 +150,64 @@ interface CrmContextValue {
 const CrmContext = createContext<CrmContextValue | null>(null)
 
 export function CrmProvider({ children }: { children: ReactNode }) {
-  const initial = loadCrm()
-  const [deals, setDeals] = useState(initial.deals)
-  const [contacts, setContacts] = useState(initial.contacts)
-  const [companies, setCompanies] = useState(initial.companies)
-  const [activities, setActivities] = useState(initial.activities)
-  const [insights, setInsights] = useState(initial.insights)
+  const { backend, ready } = useBackendMode()
+  const [deals, setDeals] = useState<CrmDeal[]>([])
+  const [contacts, setContacts] = useState<CrmContact[]>([])
+  const [companies, setCompanies] = useState<CrmCompany[]>([])
+  const [activities, setActivities] = useState<CrmActivity[]>([])
+  const [insights, setInsights] = useState<FreyaInsight[]>([])
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const data = await apiFetch<{
+      deals: Parameters<typeof mapApiCrmDeal>[0][]
+      contacts: Parameters<typeof mapApiCrmContact>[0][]
+      companies: Parameters<typeof mapApiCrmCompany>[0][]
+      activities: Parameters<typeof mapApiCrmActivity>[0][]
+      insights: Parameters<typeof mapApiCrmInsight>[0][]
+    }>('/api/crm?resource=all')
+
+    const mappedCompanies = (data.companies ?? []).map(mapApiCrmCompany)
+    const companyById = new Map(mappedCompanies.map((c) => [c.id, c]))
+    const mappedContacts = (data.contacts ?? []).map((row) =>
+      mapApiCrmContact(row, row.company_id ? companyById.get(row.company_id)?.name : undefined),
+    )
+    const mappedDeals = (data.deals ?? []).map((row) =>
+      mapApiCrmDeal(row, { companies: mappedCompanies, contacts: mappedContacts }),
+    )
+    setCompanies(mappedCompanies)
+    setContacts(mappedContacts)
+    setDeals(mappedDeals)
+    setActivities((data.activities ?? []).map(mapApiCrmActivity))
+    setInsights((data.insights ?? []).map(mapApiCrmInsight))
+  }, [backend])
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      const initial = loadCrm()
+      setDeals(initial.deals)
+      setContacts(initial.contacts)
+      setCompanies(initial.companies)
+      setActivities(initial.activities)
+      setInsights(initial.insights)
+      return
+    }
+    let cancelled = false
+    void refresh().catch(() => {
+      if (!cancelled) {
+        setDeals([])
+        setContacts([])
+        setCompanies([])
+        setActivities([])
+        setInsights([])
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
 
   const persist = useCallback(
     (next: Partial<StoredCrm>) => {
@@ -161,9 +223,9 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       if (next.companies) setCompanies(next.companies)
       if (next.activities) setActivities(next.activities)
       if (next.insights) setInsights(next.insights)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+      if (!backend) localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     },
-    [deals, contacts, companies, activities, insights],
+    [backend, deals, contacts, companies, activities, insights],
   )
 
   const selectDeal = useCallback((id: string | null) => setSelectedDealId(id), [])
@@ -171,19 +233,49 @@ export function CrmProvider({ children }: { children: ReactNode }) {
   const moveDeal = useCallback(
     (id: string, stage: DealStage) => {
       const meta = stageMeta(stage)
+      if (backend) {
+        void apiFetch('/api/crm', {
+          method: 'PATCH',
+          body: JSON.stringify({ resource: 'deals', id, stage }),
+        }).then(() => refresh())
+        setDeals((prev) =>
+          prev.map((d) =>
+            d.id === id ? { ...d, stage, lastActivity: `Moved to ${meta.label} · Just now` } : d,
+          ),
+        )
+        return
+      }
       persist({
         deals: deals.map((d) =>
           d.id === id ? { ...d, stage, lastActivity: `Moved to ${meta.label} · Just now` } : d,
         ),
       })
     },
-    [deals, persist],
+    [backend, deals, persist, refresh],
   )
 
   const addDeal = useCallback(
-    (input: AddDealInput) => {
+    async (input: AddDealInput): Promise<CrmDeal> => {
       const stage = input.stage || 'qualified'
       const owner = input.owner || 'Joy'
+
+      if (backend) {
+        const data = await apiFetch<{ deal: Parameters<typeof mapApiCrmDeal>[0] }>('/api/crm', {
+          method: 'POST',
+          body: JSON.stringify({
+            resource: 'deals',
+            title: input.title.trim(),
+            stage,
+            valueBdt: Number(input.value) || 0,
+            nextStep: input.nextStep || 'Send intro',
+          }),
+        })
+        const deal = mapApiCrmDeal(data.deal, { companies, contacts })
+        setDeals((prev) => [deal, ...prev])
+        setSelectedDealId(deal.id)
+        return deal
+      }
+
       const deal: CrmDeal = {
         id: `d${Date.now()}`,
         title: input.title.trim(),
@@ -215,11 +307,21 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       setSelectedDealId(deal.id)
       return deal
     },
-    [deals, persist],
+    [backend, companies, contacts, deals, persist],
   )
 
   const updateDeal = useCallback(
-    (id: string, patch: Partial<CrmDeal>) => {
+    async (id: string, patch: Partial<CrmDeal>) => {
+      if (backend) {
+        const body: Record<string, unknown> = { resource: 'deals', id }
+        if (patch.title != null) body.title = patch.title
+        if (patch.stage != null) body.stage = patch.stage
+        if (patch.value != null) body.valueBdt = patch.value
+        if (patch.nextStep != null) body.nextStep = patch.nextStep
+        await apiFetch('/api/crm', { method: 'PATCH', body: JSON.stringify(body) })
+        await refresh()
+        return
+      }
       persist({
         deals: deals.map((d) => {
           if (d.id !== id) return d
@@ -229,19 +331,47 @@ export function CrmProvider({ children }: { children: ReactNode }) {
         }),
       })
     },
-    [deals, persist],
+    [backend, deals, persist, refresh],
   )
 
   const removeDeal = useCallback(
     (id: string) => {
+      if (backend) {
+        void apiFetch('/api/crm', {
+          method: 'DELETE',
+          body: JSON.stringify({ resource: 'deals', id }),
+        }).then(() => refresh())
+        setDeals((prev) => prev.filter((d) => d.id !== id))
+        setSelectedDealId((cur) => (cur === id ? null : cur))
+        return
+      }
       persist({ deals: deals.filter((d) => d.id !== id) })
       setSelectedDealId((cur) => (cur === id ? null : cur))
     },
-    [deals, persist],
+    [backend, deals, persist, refresh],
   )
 
   const addContact = useCallback(
-    (input: AddContactInput) => {
+    async (input: AddContactInput): Promise<CrmContact> => {
+      if (backend) {
+        const data = await apiFetch<{ contact: Parameters<typeof mapApiCrmContact>[0] }>(
+          '/api/crm',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              resource: 'contacts',
+              name: input.name.trim(),
+              email: input.email.trim() || null,
+              phone: input.phone || null,
+              role: input.title || null,
+            }),
+          },
+        )
+        const contact = mapApiCrmContact(data.contact, input.companyName)
+        setContacts((prev) => [contact, ...prev])
+        return contact
+      }
+
       const contact: CrmContact = {
         id: `ct${Date.now()}`,
         name: input.name.trim(),
@@ -266,18 +396,47 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       persist({ contacts: [contact, ...contacts] })
       return contact
     },
-    [contacts, persist],
+    [backend, contacts, persist],
   )
 
   const updateContact = useCallback(
     (id: string, patch: Partial<CrmContact>) => {
+      if (backend) {
+        const body: Record<string, unknown> = { resource: 'contacts', id }
+        if (patch.name != null) body.name = patch.name
+        if (patch.email != null) body.email = patch.email
+        if (patch.phone != null) body.phone = patch.phone
+        if (patch.title != null) body.role = patch.title
+        // Non-optimistic: wait for the write, then re-sync from server.
+        void apiFetch('/api/crm', { method: 'PATCH', body: JSON.stringify(body) }).then(() =>
+          refresh(),
+        )
+        return
+      }
       persist({ contacts: contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
     },
-    [contacts, persist],
+    [backend, contacts, persist, refresh],
   )
 
   const addCompany = useCallback(
-    (input: AddCompanyInput) => {
+    async (input: AddCompanyInput): Promise<CrmCompany> => {
+      if (backend) {
+        const data = await apiFetch<{ company: Parameters<typeof mapApiCrmCompany>[0] }>(
+          '/api/crm',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              resource: 'companies',
+              name: input.name.trim(),
+              industry: input.industry || null,
+            }),
+          },
+        )
+        const company = mapApiCrmCompany(data.company)
+        setCompanies((prev) => [company, ...prev])
+        return company
+      }
+
       const company: CrmCompany = {
         id: `co${Date.now()}`,
         name: input.name.trim(),
@@ -299,27 +458,64 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       persist({ companies: [company, ...companies] })
       return company
     },
-    [companies, persist],
+    [backend, companies, persist],
   )
 
   const updateCompany = useCallback(
     (id: string, patch: Partial<CrmCompany>) => {
+      if (backend) {
+        const body: Record<string, unknown> = { resource: 'companies', id }
+        if (patch.name != null) body.name = patch.name
+        if (patch.industry != null) body.industry = patch.industry
+        // Non-optimistic: wait for the write, then re-sync from server.
+        void apiFetch('/api/crm', { method: 'PATCH', body: JSON.stringify(body) }).then(() =>
+          refresh(),
+        )
+        return
+      }
       persist({ companies: companies.map((c) => (c.id === id ? { ...c, ...patch } : c)) })
     },
-    [companies, persist],
+    [backend, companies, persist, refresh],
   )
 
   const toggleActivity = useCallback(
     (id: string) => {
+      const current = activities.find((a) => a.id === id)
+      if (backend && current) {
+        void apiFetch('/api/crm', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            resource: 'activities',
+            id,
+            completed: !current.done,
+          }),
+        }).then(() => refresh())
+        setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, done: !a.done } : a)))
+        return
+      }
       persist({
         activities: activities.map((a) => (a.id === id ? { ...a, done: !a.done } : a)),
       })
     },
-    [activities, persist],
+    [backend, activities, persist, refresh],
   )
 
   const addActivity = useCallback(
     (partial: Omit<CrmActivity, 'id' | 'done'> & { done?: boolean }) => {
+      if (backend) {
+        void apiFetch('/api/crm', {
+          method: 'POST',
+          body: JSON.stringify({
+            resource: 'activities',
+            title: partial.title,
+            kind: partial.type,
+            dealId: partial.relatedType === 'deal' ? partial.relatedId : null,
+            contactId: partial.relatedType === 'contact' ? partial.relatedId : null,
+            dueAt: partial.dueDate || null,
+          }),
+        }).then(() => refresh())
+        return
+      }
       const activity: CrmActivity = {
         ...partial,
         id: `a${Date.now()}`,
@@ -327,7 +523,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       }
       persist({ activities: [activity, ...activities] })
     },
-    [activities, persist],
+    [backend, activities, persist, refresh],
   )
 
   const dismissInsight = useCallback(
@@ -378,6 +574,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       toggleActivity,
       addActivity,
       dismissInsight,
+      refresh,
       totals,
     }),
     [
@@ -399,6 +596,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       toggleActivity,
       addActivity,
       dismissInsight,
+      refresh,
       totals,
     ],
   )

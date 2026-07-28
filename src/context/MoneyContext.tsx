@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -33,8 +34,20 @@ import {
   type MoneyInsight,
   type MoneyParty,
 } from '../data/moneyData'
+import { apiFetch } from '@/lib/backend/api'
+import {
+  mapApiAccount,
+  mapApiBill,
+  mapApiCashflow,
+  mapApiExpense,
+  mapApiInvoice,
+  mapApiLedgerAccount,
+  mapApiParty,
+  mapApiTransaction,
+} from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
 
-const STORAGE_KEY = 'antarious-money-v1'
+const STORAGE_KEY = 'antarious-money-v2-bd'
 
 interface StoredMoney {
   parties: MoneyParty[]
@@ -63,6 +76,22 @@ function defaults(): StoredMoney {
     insights: structuredClone(SEED_INSIGHTS),
     nextInvoiceNum: 1046,
     nextBillNum: 224,
+  }
+}
+
+function emptyBackend(): StoredMoney {
+  return {
+    parties: [],
+    invoices: [],
+    bills: [],
+    expenses: [],
+    accounts: [],
+    transactions: [],
+    ledger: [],
+    cashflow: [],
+    insights: [],
+    nextInvoiceNum: 1000,
+    nextBillNum: 200,
   }
 }
 
@@ -135,7 +164,6 @@ interface MoneyContextValue {
   selectedBillId: string | null
   selectInvoice: (id: string | null) => void
   selectBill: (id: string | null) => void
-  // summaries
   cashPosition: number
   invoicesOwed: number
   billsToPay: number
@@ -146,18 +174,17 @@ interface MoneyContextValue {
   monthIncome: number
   monthExpenses: number
   netProfit: number
-  // actions
-  createInvoice: (input: CreateInvoiceInput) => Invoice
+  createInvoice: (input: CreateInvoiceInput) => Invoice | Promise<Invoice>
   updateInvoice: (id: string, patch: Partial<Invoice>) => void
   setInvoiceStatus: (id: string, status: InvoiceStatus) => void
   markInvoicePaid: (id: string) => void
   sendInvoice: (id: string) => void
   chaseOverdue: () => number
-  createBill: (input: CreateBillInput) => Bill
+  createBill: (input: CreateBillInput) => Bill | Promise<Bill>
   updateBill: (id: string, patch: Partial<Bill>) => void
   setBillStatus: (id: string, status: BillStatus) => void
   markBillPaid: (id: string) => void
-  createExpense: (input: CreateExpenseInput) => Expense
+  createExpense: (input: CreateExpenseInput) => Expense | Promise<Expense>
   setExpenseStatus: (id: string, status: ExpenseStatus) => void
   approveExpenseCategory: (id: string) => void
   matchTransaction: (txnId: string) => void
@@ -167,23 +194,74 @@ interface MoneyContextValue {
   freyaCategorizeExpenses: () => number
   dismissInsight: (id: string) => void
   resetDemo: () => void
+  refresh: () => Promise<void>
 }
 
 const MoneyContext = createContext<MoneyContextValue | null>(null)
 
 export function MoneyProvider({ children }: { children: ReactNode }) {
-  const initial = load()
-  const [data, setData] = useState<StoredMoney>(initial)
+  const { backend, ready } = useBackendMode()
+  const [data, setData] = useState<StoredMoney>(emptyBackend)
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null)
 
-  const persist = useCallback((updater: (prev: StoredMoney) => StoredMoney) => {
-    setData((prev) => {
-      const next = updater(prev)
-      save(next)
-      return next
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const res = await apiFetch<{
+      invoices: Parameters<typeof mapApiInvoice>[0][]
+      bills: Parameters<typeof mapApiBill>[0][]
+      expenses: Parameters<typeof mapApiExpense>[0][]
+      accounts: Parameters<typeof mapApiAccount>[0][]
+      parties: Parameters<typeof mapApiParty>[0][]
+      transactions?: Parameters<typeof mapApiTransaction>[0][]
+      ledger?: Parameters<typeof mapApiLedgerAccount>[0][]
+      cashflow?: Parameters<typeof mapApiCashflow>[0][]
+    }>('/api/money?resource=all')
+
+    const parties = (res.parties ?? []).map(mapApiParty)
+    const partyName = (id?: string | null) =>
+      parties.find((p) => p.id === id)?.name
+
+    setData({
+      parties,
+      invoices: (res.invoices ?? []).map((row) => mapApiInvoice(row, partyName(row.party_id))),
+      bills: (res.bills ?? []).map((row) => mapApiBill(row, partyName(row.party_id))),
+      expenses: (res.expenses ?? []).map(mapApiExpense),
+      accounts: (res.accounts ?? []).map(mapApiAccount),
+      transactions: (res.transactions ?? []).map(mapApiTransaction),
+      ledger: (res.ledger ?? []).map(mapApiLedgerAccount),
+      cashflow: (res.cashflow ?? []).map(mapApiCashflow),
+      insights: [],
+      nextInvoiceNum: 1000,
+      nextBillNum: 200,
     })
-  }, [])
+  }, [backend])
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      setData(load())
+      return
+    }
+    let cancelled = false
+    void refresh().catch(() => {
+      if (!cancelled) setData(emptyBackend())
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
+
+  const persist = useCallback(
+    (updater: (prev: StoredMoney) => StoredMoney) => {
+      setData((prev) => {
+        const next = updater(prev)
+        if (!backend) save(next)
+        return next
+      })
+    },
+    [backend],
+  )
 
   const cashPosition = useMemo(
     () => data.accounts.reduce((s, a) => s + a.balance, 0),
@@ -207,7 +285,17 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
   )
 
   const overdueInvoices = useMemo(
-    () => data.invoices.filter((i) => i.status === 'overdue' || (invoiceBalance(i) > 0 && i.status !== 'paid' && i.status !== 'void' && i.status !== 'draft' && new Date(i.dueDate) < new Date('2026-07-16'))),
+    () =>
+      data.invoices.filter(
+        (i) =>
+          i.status === 'overdue' ||
+          (invoiceBalance(i) > 0 &&
+            i.status !== 'paid' &&
+            i.status !== 'void' &&
+            i.status !== 'draft' &&
+            i.dueDate &&
+            new Date(i.dueDate) < new Date()),
+      ),
     [data.invoices],
   )
 
@@ -230,13 +318,17 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
     const paid = data.invoices
       .filter((i) => i.status === 'paid' || i.amountPaid > 0)
       .reduce((s, i) => s + (i.status === 'paid' ? docTotal(i.items) : i.amountPaid), 0)
+    if (backend) return paid
     const salesTx = data.transactions
       .filter((t) => t.direction === 'in' && t.category === 'Sales' && t.date.startsWith('2026-07'))
       .reduce((s, t) => s + t.amount, 0)
     return Math.max(paid * 0.35 + salesTx, salesTx + 4200)
-  }, [data.invoices, data.transactions])
+  }, [backend, data.invoices, data.transactions])
 
   const monthExpenses = useMemo(() => {
+    if (backend) {
+      return data.expenses.reduce((s, e) => s + e.amount, 0)
+    }
     const billsPaid = data.bills
       .filter((b) => b.status === 'paid' && b.paidDate?.startsWith('2026-07'))
       .reduce((s, b) => s + docTotal(b.items), 0)
@@ -247,12 +339,40 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
       .filter((t) => t.direction === 'out' && t.date.startsWith('2026-07') && t.category !== 'Transfer')
       .reduce((s, t) => s + t.amount, 0)
     return Math.round((billsPaid + ex + out) / 2 + 2100)
-  }, [data.bills, data.expenses, data.transactions])
+  }, [backend, data.bills, data.expenses, data.transactions])
 
   const netProfit = monthIncome - monthExpenses
 
   const createInvoice = useCallback(
-    (input: CreateInvoiceInput) => {
+    async (input: CreateInvoiceInput): Promise<Invoice> => {
+      if (backend) {
+        const dataRes = await apiFetch<{ invoice: Parameters<typeof mapApiInvoice>[0] }>(
+          '/api/money',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              resource: 'invoices',
+              partyId: input.customerId || null,
+              status: 'draft',
+              totalBdt: input.amount,
+              dueAt: input.dueDate,
+              notes: input.notes || null,
+              lines: [
+                {
+                  description: input.description,
+                  qty: 1,
+                  unitBdt: input.amount,
+                },
+              ],
+            }),
+          },
+        )
+        const created = mapApiInvoice(dataRes.invoice, input.customerName)
+        setData((prev) => ({ ...prev, invoices: [created, ...prev.invoices] }))
+        setSelectedInvoiceId(created.id)
+        return created
+      }
+
       let created!: Invoice
       persist((prev) => {
         const num = prev.nextInvoiceNum
@@ -264,7 +384,7 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
           status: 'draft',
           issueDate: '2026-07-16',
           dueDate: input.dueDate,
-          currency: 'USD',
+          currency: 'BDT',
           items: [
             {
               id: `li${Date.now()}`,
@@ -287,17 +407,28 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
       setSelectedInvoiceId(created.id)
       return created
     },
-    [persist],
+    [backend, persist],
   )
 
   const updateInvoice = useCallback(
     (id: string, patch: Partial<Invoice>) => {
+      if (backend) {
+        void apiFetch('/api/money', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            id,
+            status: patch.status,
+            notes: patch.notes,
+            totalBdt: patch.items ? docTotal(patch.items) : undefined,
+          }),
+        }).then(() => refresh())
+      }
       persist((prev) => ({
         ...prev,
         invoices: prev.invoices.map((i) => (i.id === id ? { ...i, ...patch } : i)),
       }))
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const setInvoiceStatus = useCallback(
@@ -309,6 +440,25 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
 
   const markInvoicePaid = useCallback(
     (id: string) => {
+      if (backend) {
+        void apiFetch('/api/money', {
+          method: 'PATCH',
+          body: JSON.stringify({ id, markPaid: true, paymentMethod: 'bkash' }),
+        }).then(() => refresh())
+        persist((prev) => ({
+          ...prev,
+          invoices: prev.invoices.map((i) => {
+            if (i.id !== id) return i
+            return {
+              ...i,
+              status: 'paid' as const,
+              amountPaid: docTotal(i.items),
+              paidDate: new Date().toISOString().slice(0, 10),
+            }
+          }),
+        }))
+        return
+      }
       persist((prev) => ({
         ...prev,
         invoices: prev.invoices.map((i) => {
@@ -324,11 +474,15 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
         parties: prev.parties.map((p) => {
           const inv = prev.invoices.find((i) => i.id === id)
           if (!inv || p.id !== inv.customerId) return p
-          return { ...p, balance: Math.max(0, p.balance - invoiceBalance(inv)), lastActivity: 'Just now' }
+          return {
+            ...p,
+            balance: Math.max(0, p.balance - invoiceBalance(inv)),
+            lastActivity: 'Just now',
+          }
         }),
       }))
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const sendInvoice = useCallback(
@@ -343,7 +497,16 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
     persist((prev) => ({
       ...prev,
       invoices: prev.invoices.map((i) => {
-        if (i.status !== 'overdue' && !(invoiceBalance(i) > 0 && i.status !== 'paid' && i.status !== 'draft' && new Date(i.dueDate) < new Date('2026-07-16'))) {
+        if (
+          i.status !== 'overdue' &&
+          !(
+            invoiceBalance(i) > 0 &&
+            i.status !== 'paid' &&
+            i.status !== 'draft' &&
+            i.dueDate &&
+            new Date(i.dueDate) < new Date()
+          )
+        ) {
           return i
         }
         if (i.reminderSent) return i
@@ -355,7 +518,31 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
   }, [persist])
 
   const createBill = useCallback(
-    (input: CreateBillInput) => {
+    async (input: CreateBillInput): Promise<Bill> => {
+      if (backend) {
+        const dataRes = await apiFetch<{ bill: Parameters<typeof mapApiBill>[0] }>('/api/money', {
+          method: 'POST',
+          body: JSON.stringify({
+            resource: 'bills',
+            partyId: input.vendorId || null,
+            status: 'open',
+            totalBdt: input.amount,
+            dueAt: input.dueDate,
+            lines: [
+              {
+                description: input.description,
+                qty: 1,
+                unitBdt: input.amount,
+              },
+            ],
+          }),
+        })
+        const created = mapApiBill(dataRes.bill, input.vendorName)
+        setData((prev) => ({ ...prev, bills: [created, ...prev.bills] }))
+        setSelectedBillId(created.id)
+        return created
+      }
+
       let created!: Bill
       persist((prev) => {
         const num = prev.nextBillNum
@@ -385,17 +572,28 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
       setSelectedBillId(created.id)
       return created
     },
-    [persist],
+    [backend, persist],
   )
 
   const updateBill = useCallback(
     (id: string, patch: Partial<Bill>) => {
+      if (backend) {
+        void apiFetch('/api/money', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            resource: 'bills',
+            id,
+            status: patch.status,
+            totalBdt: patch.items ? docTotal(patch.items) : undefined,
+          }),
+        }).then(() => refresh())
+      }
       persist((prev) => ({
         ...prev,
         bills: prev.bills.map((b) => (b.id === id ? { ...b, ...patch } : b)),
       }))
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const setBillStatus = useCallback(
@@ -407,6 +605,17 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
 
   const markBillPaid = useCallback(
     (id: string) => {
+      if (backend) {
+        void apiFetch('/api/money', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            resource: 'bills',
+            id,
+            markPaid: true,
+            paymentMethod: 'bank',
+          }),
+        }).then(() => refresh())
+      }
       persist((prev) => ({
         ...prev,
         bills: prev.bills.map((b) => {
@@ -415,16 +624,36 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
             ...b,
             status: 'paid' as const,
             amountPaid: docTotal(b.items),
-            paidDate: '2026-07-16',
+            paidDate: new Date().toISOString().slice(0, 10),
           }
         }),
       }))
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const createExpense = useCallback(
-    (input: CreateExpenseInput) => {
+    async (input: CreateExpenseInput): Promise<Expense> => {
+      if (backend) {
+        const dataRes = await apiFetch<{ expense: Parameters<typeof mapApiExpense>[0] }>(
+          '/api/money',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              resource: 'expenses',
+              description: input.merchant,
+              amountBdt: input.amount,
+              category: input.category,
+              spentAt: input.date,
+              paymentMethod: 'cash',
+            }),
+          },
+        )
+        const created = mapApiExpense(dataRes.expense)
+        setData((prev) => ({ ...prev, expenses: [created, ...prev.expenses] }))
+        return created
+      }
+
       let created!: Expense
       persist((prev) => {
         created = {
@@ -444,7 +673,7 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
       })
       return created
     },
-    [persist],
+    [backend, persist],
   )
 
   const setExpenseStatus = useCallback(
@@ -476,6 +705,26 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
 
   const matchTransaction = useCallback(
     (txnId: string) => {
+      if (backend) {
+        const txn = data.transactions.find((t) => t.id === txnId)
+        const expense = data.expenses.find(
+          (e) => txn && Math.abs(e.amount - txn.amount) < 1,
+        )
+        void apiFetch('/api/money', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            resource: 'transactions',
+            id: txnId,
+            status: 'matched',
+            category: expense?.category ?? (txn?.direction === 'in' ? 'Sales' : 'Other'),
+            matchedType: 'expense',
+            matchedRef: expense?.id ?? 'manual',
+            matchedLabel: expense?.merchant ?? 'Operating',
+            freyaMatchConfidence: expense ? 92 : 80,
+          }),
+        }).then(() => refresh())
+        return
+      }
       persist((prev) => ({
         ...prev,
         transactions: prev.transactions.map((t) => {
@@ -506,34 +755,52 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
         }),
       }))
     },
-    [persist],
+    [backend, data.expenses, data.transactions, persist, refresh],
+  )
+
+  const setTxnStatus = useCallback(
+    (txnId: string, status: 'reconciled' | 'excluded') => {
+      if (backend) {
+        void apiFetch('/api/money', {
+          method: 'PATCH',
+          body: JSON.stringify({ resource: 'transactions', id: txnId, status }),
+        }).then(() => refresh())
+        setData((prev) => ({
+          ...prev,
+          transactions: prev.transactions.map((t) =>
+            t.id === txnId ? { ...t, status } : t,
+          ),
+        }))
+        return
+      }
+      persist((prev) => ({
+        ...prev,
+        transactions: prev.transactions.map((t) =>
+          t.id === txnId ? { ...t, status } : t,
+        ),
+      }))
+    },
+    [backend, persist, refresh],
   )
 
   const reconcileTransaction = useCallback(
-    (txnId: string) => {
-      persist((prev) => ({
-        ...prev,
-        transactions: prev.transactions.map((t) =>
-          t.id === txnId ? { ...t, status: 'reconciled' as const } : t,
-        ),
-      }))
-    },
-    [persist],
+    (txnId: string) => setTxnStatus(txnId, 'reconciled'),
+    [setTxnStatus],
   )
 
   const excludeTransaction = useCallback(
-    (txnId: string) => {
-      persist((prev) => ({
-        ...prev,
-        transactions: prev.transactions.map((t) =>
-          t.id === txnId ? { ...t, status: 'excluded' as const } : t,
-        ),
-      }))
-    },
-    [persist],
+    (txnId: string) => setTxnStatus(txnId, 'excluded'),
+    [setTxnStatus],
   )
 
   const freyaAutoMatch = useCallback(() => {
+    if (backend) {
+      void apiFetch('/api/money', {
+        method: 'PATCH',
+        body: JSON.stringify({ resource: 'transactions', autoMatch: true }),
+      }).then(() => refresh())
+      return data.transactions.filter((t) => t.status === 'unmatched').length
+    }
     let count = 0
     persist((prev) => ({
       ...prev,
@@ -557,7 +824,7 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
       }),
     }))
     return count
-  }, [persist])
+  }, [backend, data.transactions, persist, refresh])
 
   const freyaCategorizeExpenses = useCallback(() => {
     let count = 0
@@ -587,12 +854,16 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
   )
 
   const resetDemo = useCallback(() => {
+    if (backend) {
+      void refresh()
+      return
+    }
     const fresh = defaults()
     save(fresh)
     setData(fresh)
     setSelectedInvoiceId(null)
     setSelectedBillId(null)
-  }, [])
+  }, [backend, refresh])
 
   const value = useMemo(
     () => ({
@@ -639,6 +910,7 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
       freyaCategorizeExpenses,
       dismissInsight,
       resetDemo,
+      refresh,
     }),
     [
       data,
@@ -674,6 +946,7 @@ export function MoneyProvider({ children }: { children: ReactNode }) {
       dismissInsight,
       freyaCategorizeExpenses,
       resetDemo,
+      refresh,
     ],
   )
 

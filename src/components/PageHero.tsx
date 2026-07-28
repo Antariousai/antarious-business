@@ -5,8 +5,8 @@ const ACCENTS = {
   coral: 'page-hero-coral',
   mint: 'page-hero-mint',
   amber: 'page-hero-amber',
-  violet: 'page-hero-violet',
   teal: 'page-hero-teal',
+  peach: 'page-hero-peach',
 } as const
 
 export function PageHero({

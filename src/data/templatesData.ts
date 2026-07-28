@@ -32,7 +32,7 @@ export const SEED_TEMPLATES: PostTemplate[] = [
     lastUsed: '15 Jul',
     icon: 'spotlight',
     exampleCaption:
-      'Craving something flaky? Our butter croissants are baked fresh every morning — swing by before noon 🥐✨',
+      'New drop alert ✨ Hand-embroidered kurtis just landed — swing by our Dhanmondi shop before noon.',
     freyaNote: 'Best for feed posts when you have a hero product photo.',
     createdAt: '2026-05-01',
   },
@@ -45,7 +45,7 @@ export const SEED_TEMPLATES: PostTemplate[] = [
     lastUsed: '12 Jul',
     icon: 'heart',
     exampleCaption:
-      '"Best birthday cake we\'ve ever had." — Priya. Moments like this are why we bake. Tag us in your celebrations 💛',
+      '"Found my Eid saree in ten minutes." — Priya. Moments like this are why we open every morning. Tag us in your looks 💛',
     freyaNote: 'Use when a customer leaves a glowing review or tags you.',
     createdAt: '2026-05-08',
   },
@@ -53,12 +53,12 @@ export const SEED_TEMPLATES: PostTemplate[] = [
     id: 'tpl3',
     name: 'Behind the Scenes',
     structure: '[Short process] + [Human moment] + [Question]',
-    visual: 'Action shot in the kitchen',
+    visual: 'Action shot on the worktable',
     usedCount: 15,
     lastUsed: '14 Jul',
     icon: 'camera',
     exampleCaption:
-      '6am laminating dough before the city wakes up. What\'s the first thing you bake (or buy) on a Saturday?',
+      '6am pinning hems before Dhanmondi wakes up. What\'s the first thing you try on (or gift) on a Saturday?',
     freyaNote: 'Great for Stories and Reels — keeps the brand human.',
     createdAt: '2026-04-20',
   },
@@ -71,7 +71,7 @@ export const SEED_TEMPLATES: PostTemplate[] = [
     lastUsed: '8 Jul',
     icon: 'flash',
     exampleCaption:
-      'Today only: buy 6 pastries, get 2 free. Ends at 4pm — don’t sleep on it ⏰',
+      'Today only: buy any 2 kurtis, get a free dupatta. Ends at 4pm — don’t sleep on it ⏰',
     freyaNote: 'Keep urgency honest — Freya won’t overuse this style.',
     createdAt: '2026-06-01',
   },
@@ -84,8 +84,8 @@ export const SEED_TEMPLATES: PostTemplate[] = [
     lastUsed: '2 Jul',
     icon: 'team',
     exampleCaption:
-      'Meet Maya — our pastry lead who can score a baguette by sound alone. Come say hi next time you\'re in.',
-    freyaNote: 'Builds trust for B2B buyers and local regulars.',
+      'Meet Amina — our in-house tailor who can eyeball a perfect blouse fit. Come say hi next time you’re in Dhanmondi.',
+    freyaNote: 'Builds trust for bridal buyers and local regulars.',
     createdAt: '2026-06-15',
   },
   {
@@ -97,7 +97,7 @@ export const SEED_TEMPLATES: PostTemplate[] = [
     lastUsed: '13 Jul',
     icon: 'pov',
     exampleCaption:
-      'POV: you said you\'d only grab a coffee… and somehow left with a box of kouign-amann. Tag your enabler 👀',
+      'POV: you said you’d only browse… and somehow left with a jamdani and matching earrings. Tag your enabler 👀',
     freyaNote: 'High share rate on Instagram — Freya loves this for weekends.',
     createdAt: '2026-05-22',
   },

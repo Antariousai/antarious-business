@@ -9,6 +9,8 @@ import { useMoney } from '../context/MoneyContext'
 import { useApp } from '../context/AppContext'
 import { parseFreyaIntent } from '../lib/freyaIntents'
 import { audienceWord } from '../data/planTiers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { approveFreyaActivities, streamFreyaChat } from '@/lib/backend/freyaChat'
 
 type ChatMsg = { id: string; role: 'freya' | 'you'; text: string }
 
@@ -46,12 +48,18 @@ function fabSize(starter: boolean) {
   return starter ? { w: FAB_W_STARTER, h: FAB_H_STARTER } : { w: FAB_W, h: FAB_H }
 }
 
+function mobileTabInset() {
+  if (typeof window === 'undefined') return 0
+  return window.matchMedia('(min-width: 1024px)').matches ? 0 : 72
+}
+
 function defaultPos(starter = false): FabPos {
   if (typeof window === 'undefined') return { x: 24, y: 24 }
   const { w, h } = fabSize(starter)
+  const bottom = 24 + mobileTabInset()
   return {
     x: Math.max(MARGIN, window.innerWidth - w - 24),
-    y: Math.max(MARGIN, window.innerHeight - h - 24),
+    y: Math.max(MARGIN, window.innerHeight - h - bottom),
   }
 }
 
@@ -70,15 +78,27 @@ function loadPos(starter = false): FabPos {
 function clampPos(pos: FabPos, starter = false): FabPos {
   const { w, h } = fabSize(starter)
   const maxX = Math.max(MARGIN, window.innerWidth - w - MARGIN)
-  const maxY = Math.max(MARGIN, window.innerHeight - h - MARGIN)
+  const maxY = Math.max(MARGIN, window.innerHeight - h - MARGIN - mobileTabInset())
   return {
     x: Math.min(maxX, Math.max(MARGIN, pos.x)),
     y: Math.min(maxY, Math.max(MARGIN, pos.y)),
   }
 }
 
+function wantsApproveAll(text: string) {
+  const t = text.toLowerCase()
+  return (
+    t.includes('approve what’s waiting') ||
+    t.includes("approve what's waiting") ||
+    t.includes('approve whats waiting') ||
+    t.includes('approve all') ||
+    (t.includes('approve') && t.includes('waiting'))
+  )
+}
+
 export function AskFreya() {
   const navigate = useNavigate()
+  const { backend } = useBackendMode()
   const { profile, prefs, startTour, planTier, spendAiCredits, aiCreditsRemaining } = useApp()
   const isStarter = planTier === 'starter'
   const {
@@ -89,6 +109,7 @@ export function AskFreya() {
     setPanelTab,
     waitingCount,
     approveAll,
+    refresh: refreshActivity,
   } = useFreyaActivity()
   const { approveAllDrafts } = useInbox()
   const { overdueInvoices } = useMoney()
@@ -111,7 +132,9 @@ export function AskFreya() {
     },
   ])
   const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const [pos, setPos] = useState<FabPos>(() => loadPos(false))
   const [dragging, setDragging] = useState(false)
@@ -140,9 +163,13 @@ export function AskFreya() {
     return () => window.removeEventListener('resize', onResize)
   }, [isStarter])
 
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
   function runIntent(text: string) {
     if (!spendAiCredits(1)) {
-      return `I'm out of AI credits for now (${aiCreditsRemaining} left). Grab a pack in Settings — Boost is $5 for 1,000 credits — or wait for next month's allowance.`
+      return `I'm out of AI credits for now (${aiCreditsRemaining} left). Grab a pack in Settings — Boost is ৳499 for 1,000 credits — or wait for next month's allowance.`
     }
 
     const result = parseFreyaIntent(text, {
@@ -172,15 +199,86 @@ export function AskFreya() {
     return result.reply
   }
 
+  async function sendBackend(text: string, history: ChatMsg[]) {
+    const replyId = `f${Date.now() + 1}`
+    setMessages((prev) => [...prev, { id: replyId, role: 'freya', text: '…' }])
+
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+
+    try {
+      if (wantsApproveAll(text)) {
+        await approveFreyaActivities({ approveAll: true })
+        approveAllDrafts()
+        await refreshActivity()
+      }
+
+      const result = await streamFreyaChat(
+        history,
+        (partial) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === replyId ? { ...m, text: partial || '…' } : m)),
+          )
+        },
+        ac.signal,
+      )
+
+      setMessages((prev) =>
+        prev.map((m) => (m.id === replyId ? { ...m, text: result.text || 'Done.' } : m)),
+      )
+
+      if (result.openActivity) setPanelTab('activity')
+      if (result.navigatePath) {
+        navigate(result.navigatePath)
+        closePanel()
+      }
+      void refreshActivity()
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') return
+      const message =
+        err instanceof Error ? err.message : 'Something went wrong talking to Freya.'
+      if (/failed to fetch|network|401|403/i.test(message)) {
+        const replyText = runIntent(text)
+        setMessages((prev) =>
+          prev.map((m) => (m.id === replyId ? { ...m, text: replyText } : m)),
+        )
+        return
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === replyId
+            ? {
+                ...m,
+                text:
+                  message.includes('credits') || message.includes('CREDITS')
+                    ? `I'm out of AI credits (${aiCreditsRemaining} left). Grab a pack in Settings.`
+                    : message,
+              }
+            : m,
+        ),
+      )
+    }
+  }
+
   function send(e?: FormEvent, preset?: string) {
     e?.preventDefault()
     const text = (preset ?? draft).trim()
-    if (!text) return
+    if (!text || sending) return
     const you: ChatMsg = { id: `u${Date.now()}`, role: 'you', text }
+    setDraft('')
+
+    if (backend) {
+      setSending(true)
+      const history = [...messages, you]
+      setMessages(history)
+      void sendBackend(text, history).finally(() => setSending(false))
+      return
+    }
+
     const replyText = runIntent(text)
     const reply: ChatMsg = { id: `f${Date.now() + 1}`, role: 'freya', text: replyText }
     setMessages((prev) => [...prev, you, reply])
-    setDraft('')
   }
 
   function onFabPointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
@@ -279,7 +377,9 @@ export function AskFreya() {
                 <FreyaAvatar size={36} online />
                 <div>
                   <div className="text-sm font-bold">Freya</div>
-                  <div className="text-[11px] text-online">● Online · your AI teammate</div>
+                  <div className="text-[11px] text-online">
+                    ● {backend ? 'Online · workspace' : 'Online · demo'} · your AI teammate
+                  </div>
                 </div>
               </div>
               <button
@@ -352,7 +452,8 @@ export function AskFreya() {
                           key={s}
                           type="button"
                           onClick={() => send(undefined, s)}
-                          className="rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-sky shadow-sm ring-1 ring-sky/20 hover:bg-sky-soft"
+                          disabled={sending}
+                          className="rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-sky shadow-sm ring-1 ring-sky/20 hover:bg-sky-soft disabled:opacity-50"
                         >
                           {s}
                         </button>
@@ -365,11 +466,12 @@ export function AskFreya() {
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     placeholder="Just say what you need…"
-                    className="h-11 flex-1 rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
+                    disabled={sending}
+                    className="h-11 flex-1 rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20 disabled:opacity-60"
                   />
                   <button
                     type="submit"
-                    disabled={!draft.trim()}
+                    disabled={!draft.trim() || sending}
                     className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky to-teal-400 text-white hover:brightness-105 disabled:opacity-50"
                   >
                     <Send className="h-4 w-4" />

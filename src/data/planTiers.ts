@@ -5,13 +5,14 @@ export type PlanTier = 'starter' | 'growth' | 'scale'
 export type TeamSize = 'solo' | 'few' | 'bigger'
 
 export type BusinessTypeChip =
-  | 'shop'
-  | 'service'
-  | 'brand'
-  | 'agency'
-  | 'professional'
-  | 'logistics'
-  | 'supplier'
+  | 'retail'
+  | 'restaurant'
+  | 'pharmacy'
+  | 'tuition'
+  | 'salon'
+  | 'garments'
+  | 'clinic'
+  | 'freelancer'
   | 'other'
 
 /** Module keys used for nav + route gating */
@@ -32,7 +33,7 @@ export interface PlanEntitlements {
   id: PlanTier
   label: string
   promise: string
-  /** USD list price for the feature tier (platform fee) */
+  /** BDT list price for the feature tier (platform fee) */
   priceMonthly: number
   /** Freya AI credits included each month */
   includedAiCredits: number
@@ -44,8 +45,8 @@ export interface PlanEntitlements {
 }
 
 export const INCLUDED_OWNER_SEATS = 1
-/** Extra teammates beyond the owner */
-export const SEAT_PRICE_MONTHLY = 7
+/** Extra teammates beyond the owner (BDT / month) */
+export const SEAT_PRICE_MONTHLY = 499
 
 export type AiCreditPackId = 'boost' | 'busy' | 'power'
 
@@ -53,13 +54,14 @@ export interface AiCreditPack {
   id: AiCreditPackId
   label: string
   credits: number
-  priceUsd: number
+  /** BDT */
+  priceBdt: number
 }
 
 export const AI_CREDIT_PACKS: AiCreditPack[] = [
-  { id: 'boost', label: 'Boost', credits: 1000, priceUsd: 5 },
-  { id: 'busy', label: 'Busy month', credits: 5000, priceUsd: 20 },
-  { id: 'power', label: 'Power', credits: 15000, priceUsd: 50 },
+  { id: 'boost', label: 'Boost', credits: 1000, priceBdt: 499 },
+  { id: 'busy', label: 'Busy month', credits: 5000, priceBdt: 1999 },
+  { id: 'power', label: 'Power', credits: 15000, priceBdt: 4999 },
 ]
 
 export const PLAN_TIERS: Record<PlanTier, PlanEntitlements> = {
@@ -67,7 +69,7 @@ export const PLAN_TIERS: Record<PlanTier, PlanEntitlements> = {
     id: 'starter',
     label: 'Starter',
     promise: 'Freya runs the day-to-day. You approve.',
-    priceMonthly: 19,
+    priceMonthly: 1999,
     includedAiCredits: 1000,
     maxChannels: 2,
     modules: ['today', 'posts', 'messages', 'customers', 'money', 'settings'],
@@ -78,7 +80,7 @@ export const PLAN_TIERS: Record<PlanTier, PlanEntitlements> = {
     id: 'growth',
     label: 'Growth',
     promise: 'Grow without hiring a marketer.',
-    priceMonthly: 49,
+    priceMonthly: 4999,
     includedAiCredits: 5000,
     maxChannels: 5,
     modules: [
@@ -100,7 +102,7 @@ export const PLAN_TIERS: Record<PlanTier, PlanEntitlements> = {
     id: 'scale',
     label: 'Scale',
     promise: 'Team works together; Freya keeps ops tidy.',
-    priceMonthly: 129,
+    priceMonthly: 12999,
     includedAiCredits: 20000,
     maxChannels: 10,
     modules: [
@@ -123,11 +125,15 @@ export const PLAN_TIERS: Record<PlanTier, PlanEntitlements> = {
 
 export function formatPlanPrice(tier: PlanTier | PlanEntitlements): string {
   const price = typeof tier === 'string' ? PLAN_TIERS[tier].priceMonthly : tier.priceMonthly
-  return `$${price}/mo`
+  return `৳${price.toLocaleString('en-BD')}/mo`
 }
 
 export function formatSeatPrice(): string {
-  return `$${SEAT_PRICE_MONTHLY}/seat/mo`
+  return `৳${SEAT_PRICE_MONTHLY.toLocaleString('en-BD')}/seat/mo`
+}
+
+export function formatBdt(amount: number): string {
+  return `৳${amount.toLocaleString('en-BD')}`
 }
 
 export function estimateMonthlyTotal(tier: PlanTier, seatCount: number): number {
@@ -156,20 +162,21 @@ export function getAiCreditPack(id: AiCreditPackId): AiCreditPack | undefined {
 }
 
 export const BUSINESS_TYPE_CHIPS: { id: BusinessTypeChip; label: string }[] = [
-  { id: 'shop', label: 'Shop / café' },
-  { id: 'service', label: 'Local service' },
-  { id: 'brand', label: 'Online brand' },
-  { id: 'agency', label: 'Agency' },
-  { id: 'professional', label: 'Professional (law, etc.)' },
-  { id: 'logistics', label: 'Shipping / logistics' },
-  { id: 'supplier', label: 'Supplier / wholesale' },
+  { id: 'retail', label: 'Retail shop' },
+  { id: 'restaurant', label: 'Restaurant / café' },
+  { id: 'pharmacy', label: 'Pharmacy' },
+  { id: 'tuition', label: 'Tuition / coaching' },
+  { id: 'salon', label: 'Salon / beauty' },
+  { id: 'garments', label: 'Garments / boutique' },
+  { id: 'clinic', label: 'Clinic' },
+  { id: 'freelancer', label: 'Freelancer' },
   { id: 'other', label: 'Other' },
 ]
 
 export const TEAM_SIZE_OPTIONS: { id: TeamSize; label: string; hint: string }[] = [
-  { id: 'solo', label: 'Just me', hint: 'Starter · $19/mo fits most solo owners' },
-  { id: 'few', label: 'A few people', hint: 'Growth · $49/mo for pushes & follow-ups' },
-  { id: 'bigger', label: 'A bigger team', hint: 'Scale · $129/mo when the team shares Freya' },
+  { id: 'solo', label: 'Just me', hint: 'Starter · ৳1,999/mo fits most solo owners' },
+  { id: 'few', label: 'A few people', hint: 'Growth · ৳4,999/mo for pushes & follow-ups' },
+  { id: 'bigger', label: 'A bigger team', hint: 'Scale · ৳12,999/mo when the team shares Freya' },
 ]
 
 /** Map sidebar/route paths to modules */

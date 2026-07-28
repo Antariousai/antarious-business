@@ -2,21 +2,51 @@
 
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand */
   --color-navy: #0f1724;
   --color-navy-deep: #0b131e;
   --color-navy-mid: #141e2b;
   --color-sky: #38bdf8;
-  --color-sky-bright: #0ea5e9;
+  --color-sky-bright: #0284c7;
   --color-sky-soft: #e0f2fe;
   --color-sky-muted: #7dd3fc;
   --color-coral: #fb7185;
   --color-mint: #34d399;
   --color-sunshine: #fbbf24;
   --color-peach: #fdba74;
-  --color-page: #f3f7fb;
-  --color-ink: #1a2332;
-  --color-muted: #64748b;
+  --color-page: #f4f8fc;
+  --color-ink: #0f1a28;
+  --color-muted: #5b6b7c;
   --color-online: #4ade80;
+
+  /* Semantic → brand hues */
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #fb7185;
+  --color-info: #38bdf8;
+
+  /* Neutral ramp (prefer over raw slate-*) */
+  --color-neutral-50: #f8fafc;
+  --color-neutral-100: #f1f5f9;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
+
+  /* Radius */
+  --radius-control: 0.75rem;
+  --radius-card: 1.25rem;
+  --radius-pill: 9999px;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px -4px rgba(15, 23, 42, 0.08);
+  --shadow-card:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 10px 28px -18px rgba(14, 165, 233, 0.35);
 }
 
 * {
@@ -146,12 +176,12 @@ textarea {
   background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 48%, #ea580c 100%);
 }
 
-.page-hero-violet {
-  background: linear-gradient(135deg, #818cf8 0%, #6366f1 50%, #4f46e5 100%);
-}
-
 .page-hero-teal {
   background: linear-gradient(135deg, #2dd4bf 0%, #14b8a6 45%, #0d9488 100%);
+}
+
+.page-hero-peach {
+  background: linear-gradient(135deg, #fdba74 0%, #fb923c 50%, #ea580c 100%);
 }
 
 .nav-icon-chip {

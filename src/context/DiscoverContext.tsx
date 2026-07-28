@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -19,8 +20,17 @@ import {
   type DiscoverTrend,
   type SignalType,
 } from '../data/discoverData'
+import { apiFetch } from '@/lib/backend/api'
+import {
+  mapApiCompetitorWatch,
+  mapApiContentIdea,
+  mapApiDiscoverInsight,
+  mapApiDiscoverSignal,
+  mapApiDiscoverTrend,
+} from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
 
-const STORAGE_KEY = 'antarious-discover-v1'
+const STORAGE_KEY = 'antarious-discover-v2-bd'
 
 interface StoredDiscover {
   signals: DiscoverSignal[]
@@ -37,6 +47,16 @@ function defaults(): StoredDiscover {
     ideas: structuredClone(SEED_IDEAS),
     competitors: structuredClone(SEED_COMPETITORS),
     insights: structuredClone(SEED_INSIGHTS),
+  }
+}
+
+function emptyBackend(): StoredDiscover {
+  return {
+    signals: [],
+    trends: [],
+    ideas: [],
+    competitors: [],
+    insights: [],
   }
 }
 
@@ -79,33 +99,103 @@ interface DiscoverContextValue {
   useIdea: (ideaId: string) => void
   dismissInsight: (id: string) => void
   resetDemo: () => void
+  refresh: () => Promise<void>
+  runRefresh: () => Promise<void>
+  refreshing: boolean
 }
 
 const DiscoverContext = createContext<DiscoverContextValue | null>(null)
 
 export function DiscoverProvider({ children }: { children: ReactNode }) {
-  const initial = load()
-  const [data, setData] = useState<StoredDiscover>(initial)
+  const { backend, ready } = useBackendMode()
+  const [data, setData] = useState<StoredDiscover>(emptyBackend)
   const [typeFilter, setTypeFilter] = useState<SignalType | 'all'>('all')
+  const [refreshing, setRefreshing] = useState(false)
 
-  const persist = useCallback((updater: (prev: StoredDiscover) => StoredDiscover) => {
-    setData((prev) => {
-      const next = updater(prev)
-      save(next)
-      return next
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const res = await apiFetch<{
+      signals: Parameters<typeof mapApiDiscoverSignal>[0][]
+      ideas: Parameters<typeof mapApiContentIdea>[0][]
+      insights?: Parameters<typeof mapApiDiscoverInsight>[0][]
+      trends?: Parameters<typeof mapApiDiscoverTrend>[0][]
+      competitors?: Parameters<typeof mapApiCompetitorWatch>[0][]
+    }>('/api/discover/refresh')
+    setData({
+      signals: (res.signals ?? []).map(mapApiDiscoverSignal),
+      ideas: (res.ideas ?? []).map(mapApiContentIdea),
+      insights: (res.insights ?? []).map(mapApiDiscoverInsight),
+      trends: (res.trends ?? []).map(mapApiDiscoverTrend),
+      competitors: (res.competitors ?? []).map(mapApiCompetitorWatch),
     })
-  }, [])
+  }, [backend])
 
-  const markConverted = useCallback(
-    (signalId: string) => {
+  const runRefresh = useCallback(async () => {
+    if (!backend) {
+      resetDemoLocal()
+      return
+    }
+    setRefreshing(true)
+    try {
+      await apiFetch('/api/discover/refresh', { method: 'POST' })
+      await refresh()
+    } finally {
+      setRefreshing(false)
+    }
+  }, [backend, refresh])
+
+  function resetDemoLocal() {
+    const fresh = defaults()
+    save(fresh)
+    setData(fresh)
+    setTypeFilter('all')
+  }
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      setData(load())
+      return
+    }
+    let cancelled = false
+    void refresh().catch(() => {
+      if (!cancelled) setData(emptyBackend())
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
+
+  const persist = useCallback(
+    (updater: (prev: StoredDiscover) => StoredDiscover) => {
+      setData((prev) => {
+        const next = updater(prev)
+        if (!backend) save(next)
+        return next
+      })
+    },
+    [backend],
+  )
+
+  const patchSignalStatus = useCallback(
+    (signalId: string, status: DiscoverSignal['status']) => {
+      if (backend) {
+        void apiFetch('/api/discover/refresh', {
+          method: 'PATCH',
+          body: JSON.stringify({ resource: 'signals', id: signalId, status }),
+        })
+      }
       persist((prev) => ({
         ...prev,
-        signals: prev.signals.map((s) =>
-          s.id === signalId ? { ...s, status: 'converted' as const } : s,
-        ),
+        signals: prev.signals.map((s) => (s.id === signalId ? { ...s, status } : s)),
       }))
     },
-    [persist],
+    [backend, persist],
+  )
+
+  const markConverted = useCallback(
+    (signalId: string) => patchSignalStatus(signalId, 'converted'),
+    [patchSignalStatus],
   )
 
   const saveSignal = useCallback(
@@ -116,24 +206,29 @@ export function DiscoverProvider({ children }: { children: ReactNode }) {
           s.id === signalId && s.status === 'new' ? { ...s, status: 'saved' as const } : s,
         ),
       }))
+      if (backend) {
+        void apiFetch('/api/discover/refresh', {
+          method: 'PATCH',
+          body: JSON.stringify({ resource: 'signals', id: signalId, status: 'saved' }),
+        })
+      }
     },
-    [persist],
+    [backend, persist],
   )
 
   const dismissSignal = useCallback(
-    (signalId: string) => {
-      persist((prev) => ({
-        ...prev,
-        signals: prev.signals.map((s) =>
-          s.id === signalId ? { ...s, status: 'dismissed' as const } : s,
-        ),
-      }))
-    },
-    [persist],
+    (signalId: string) => patchSignalStatus(signalId, 'dismissed'),
+    [patchSignalStatus],
   )
 
   const saveIdea = useCallback(
     (ideaId: string) => {
+      if (backend) {
+        void apiFetch('/api/discover/refresh', {
+          method: 'PATCH',
+          body: JSON.stringify({ resource: 'ideas', id: ideaId, status: 'saved' }),
+        })
+      }
       persist((prev) => ({
         ...prev,
         ideas: prev.ideas.map((i) =>
@@ -141,11 +236,17 @@ export function DiscoverProvider({ children }: { children: ReactNode }) {
         ),
       }))
     },
-    [persist],
+    [backend, persist],
   )
 
   const useIdea = useCallback(
     (ideaId: string) => {
+      if (backend) {
+        void apiFetch('/api/discover/refresh', {
+          method: 'PATCH',
+          body: JSON.stringify({ resource: 'ideas', id: ideaId, status: 'used' }),
+        })
+      }
       persist((prev) => ({
         ...prev,
         ideas: prev.ideas.map((i) =>
@@ -153,7 +254,7 @@ export function DiscoverProvider({ children }: { children: ReactNode }) {
         ),
       }))
     },
-    [persist],
+    [backend, persist],
   )
 
   const dismissInsight = useCallback(
@@ -167,11 +268,12 @@ export function DiscoverProvider({ children }: { children: ReactNode }) {
   )
 
   const resetDemo = useCallback(() => {
-    const fresh = defaults()
-    save(fresh)
-    setData(fresh)
-    setTypeFilter('all')
-  }, [])
+    if (backend) {
+      void runRefresh()
+      return
+    }
+    resetDemoLocal()
+  }, [backend, runRefresh])
 
   const filteredSignals = useMemo(() => {
     const visible = data.signals.filter((s) => s.status !== 'dismissed')
@@ -199,6 +301,9 @@ export function DiscoverProvider({ children }: { children: ReactNode }) {
       useIdea,
       dismissInsight,
       resetDemo,
+      refresh,
+      runRefresh,
+      refreshing,
     }),
     [
       data,
@@ -212,6 +317,9 @@ export function DiscoverProvider({ children }: { children: ReactNode }) {
       useIdea,
       dismissInsight,
       resetDemo,
+      refresh,
+      runRefresh,
+      refreshing,
     ],
   )
 

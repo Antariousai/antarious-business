@@ -5,7 +5,7 @@ export type GoalId =
   | 'replies'
   | 'money'
 
-export type Platform = 'Instagram' | 'Facebook' | 'LinkedIn'
+export type Platform = 'Facebook' | 'Messenger' | 'WhatsApp' | 'Instagram' | 'LinkedIn'
 
 export interface BusinessProfile {
   ownerName: string
@@ -105,34 +105,56 @@ export const GOAL_OPTIONS: { id: GoalId; label: string }[] = [
   { id: 'money', label: 'Keep money tidy' },
 ]
 
-export const PLATFORM_OPTIONS: Platform[] = ['Instagram', 'Facebook', 'LinkedIn']
+export const PLATFORM_OPTIONS: Platform[] = ['Facebook', 'Messenger', 'WhatsApp', 'Instagram']
 
-/** Square Instagram-style bakery photos. */
+/** Square product photos for boutique retail demo. */
 function igPhoto(id: string) {
   return `https://images.unsplash.com/${id}?auto=format&fit=crop&w=800&h=800&q=80`
 }
 
+const photos = {
+  kurtiRack: igPhoto('photo-1483985988355-763728e1935b'),
+  sareeDisplay: igPhoto('photo-1594938298603-c8148c4dae35'),
+  boutiqueCounter: igPhoto('photo-1441986300917-64674bd600d8'),
+  embroidery: igPhoto('photo-1558618666-fcd25c85cd64'),
+  shoppingBag: igPhoto('photo-1558171813-4c088753af8f'),
+  fittingRoom: igPhoto('photo-1469334031218-e382a71b716b'),
+  jewelry: igPhoto('photo-1515562141207-7a88fb7ce338'),
+  seasonal: igPhoto('photo-1490481651871-ab68de25d43d'),
+  windowDisplay: igPhoto('photo-1445205170230-053b83016050'),
+  customerMoment: igPhoto('photo-1487412720507-e7ab37603c6f'),
+  eidCollection: igPhoto('photo-1583391733956-3750e0ff4e8b'),
+  accessories: igPhoto('photo-1596462502278-27bfdc403348'),
+  packaging: igPhoto('photo-1607083206869-4c7672e72a8a'),
+  storefront: igPhoto('photo-1523381210434-271e8be1f52b'),
+  tailorWork: igPhoto('photo-1558618666-fcd25c85cd64'),
+  fabricClose: igPhoto('photo-1558171813-4c088753af8f'),
+} as const
+
+export const BOUTIQUE = photos
+
+/** Legacy key names → boutique photos (keeps older page imports working). */
 export const BAKERY = {
-  croissants: igPhoto('photo-1555507036-ab1f4038808a'),
-  sourdough: igPhoto('photo-1509440159596-0249088772ff'),
-  coffeeAndPastry: igPhoto('photo-1495474472287-4d71bcdd2085'),
-  berryTart: igPhoto('photo-1488477181946-6428a0291777'),
-  bakeryCounter: igPhoto('photo-1517433670267-08bbd4be890f'),
-  bakerKitchen: igPhoto('photo-1556910103-1c02745aae4d'),
-  pastryChef: igPhoto('photo-1577219491135-ce391730fb2c'),
-  breakfastCatering: igPhoto('photo-1504754524776-8f4f37790ca0'),
-  seasonalFruit: igPhoto('photo-1464305795204-6f5bbfc7fb81'),
-  cozyCafe: igPhoto('photo-1554118811-1e0d58224f24'),
-  freshBread: igPhoto('photo-1586444248902-2f64eddc13df'),
-  laminatedPastry: igPhoto('photo-1623334044303-241021148842'),
-  berryCake: igPhoto('photo-1565958011703-44f9829ba187'),
-  cupcakes: igPhoto('photo-1486427944299-d1955d23e34d'),
-  cookies: igPhoto('photo-1612203985729-70726954388c'),
-  cinnamonRoll: igPhoto('photo-1515823064-d6e0c04616a7'),
+  croissants: photos.kurtiRack,
+  sourdough: photos.sareeDisplay,
+  coffeeAndPastry: photos.accessories,
+  berryTart: photos.eidCollection,
+  bakeryCounter: photos.boutiqueCounter,
+  bakerKitchen: photos.tailorWork,
+  pastryChef: photos.customerMoment,
+  breakfastCatering: photos.shoppingBag,
+  seasonalFruit: photos.seasonal,
+  cozyCafe: photos.storefront,
+  freshBread: photos.windowDisplay,
+  laminatedPastry: photos.embroidery,
+  berryCake: photos.jewelry,
+  cupcakes: photos.packaging,
+  cookies: photos.fittingRoom,
+  cinnamonRoll: photos.fabricClose,
 } as const
 
 /** Fallback pool for generated campaign creatives */
-export const DEMO_IMAGES = Object.values(BAKERY)
+export const DEMO_IMAGES = Object.values(BOUTIQUE)
 
 export const APPROVALS: ApprovalItem[] = [
   {
@@ -140,9 +162,9 @@ export const APPROVALS: ApprovalItem[] = [
     type: 'post',
     emoji: '📸',
     tag: 'Freya draft',
-    title: 'New seasonal menu',
-    body: "New seasonal menu dropping next week 🍇 Can you guess what flavor we're adding? Hint: it's berry-licious.",
-    image: BAKERY.seasonalFruit,
+    title: 'New Eid collection',
+    body: "New Eid collection dropping next week ✨ Can you guess the colour story? Hint: it's jewel-toned.",
+    image: BOUTIQUE.seasonal,
     status: 'waiting',
   },
   {
@@ -151,8 +173,8 @@ export const APPROVALS: ApprovalItem[] = [
     emoji: '🍞',
     tag: 'Freya draft',
     title: 'Flash sale',
-    body: 'Flash sale this Friday only — 20% off all bread loaves from 3pm to close. Set your reminder ⏰',
-    image: BAKERY.freshBread,
+    body: 'Flash sale this Friday only — 20% off all kurtis from 3pm to close. Set your reminder ⏰',
+    image: BOUTIQUE.windowDisplay,
     status: 'waiting',
   },
   {
@@ -161,8 +183,8 @@ export const APPROVALS: ApprovalItem[] = [
     emoji: '💻',
     tag: 'Freya draft',
     title: 'Meet the team',
-    body: "Meet the team Monday 👋 This is Amina, our head pastry chef — 12 years of turning butter into magic.",
-    image: BAKERY.pastryChef,
+    body: "Meet the team Monday 👋 This is Amina, our in-house tailor — 12 years of perfect fits in Dhanmondi.",
+    image: BOUTIQUE.customerMoment,
     status: 'waiting',
   },
   {
@@ -170,41 +192,41 @@ export const APPROVALS: ApprovalItem[] = [
     type: 'post',
     emoji: '💼',
     tag: 'Freya draft',
-    title: 'Chamber catering',
-    body: "Proud to announce we'll be catering the annual Chamber of Commerce breakfast next month... 🥐",
-    image: BAKERY.breakfastCatering,
+    title: 'Chamber reception',
+    body: "Proud to dress the annual Dhaka Chamber reception next month — custom sarees & sherwanis.",
+    image: BOUTIQUE.shoppingBag,
     status: 'waiting',
   },
   {
     id: 'a5',
     type: 'message',
-    recipient: 'Priya Patel',
-    title: 'Wedding cake inquiry',
-    body: "Hi Priya! I'd love to help with your wedding cake. Could you share an approximate guest count and any dietary needs? Happy to suggest flavors that photograph beautifully too.",
+    recipient: 'Fahim Ahmed',
+    title: 'Bridal lehenga inquiry',
+    body: "Hi Fahim! I'd love to help with the bridal lehenga. Could you share the wedding date and preferred colours? Happy to suggest pieces that photograph beautifully too.",
     status: 'waiting',
   },
   {
     id: 'a6',
     type: 'message',
-    recipient: 'Sarah Chen',
-    title: 'Catering options',
-    body: "Hi Sarah — thanks for reaching out! We have corporate breakfast packages starting at $12/person. Would Tuesday or Thursday work for a tasting?",
+    recipient: 'Sadia Khan',
+    title: 'Custom saree options',
+    body: "Hi Sadia — thanks for reaching out! Custom jamdani sarees start around ৳12,500. Would Tuesday or Thursday work for a fitting?",
     status: 'waiting',
   },
   {
     id: 'a7',
     type: 'message',
-    recipient: 'Diego Santos',
-    title: 'Craft-service pastries',
-    body: "Hey Diego! We can do a craft-service pastry box for your film day — croissants, muffins, and fruit danishes. How many crew members?",
+    recipient: 'Karim Hossain',
+    title: 'Film-day wardrobe',
+    body: "Hey Karim! We can kit a film-day wardrobe box — kurtis, dupattas, and accessories. How many cast members?",
     status: 'waiting',
   },
   {
     id: 'a8',
     type: 'message',
-    recipient: 'Olivia Brooks',
-    title: 'Weekly breakfast',
-    body: "Olivia — love the weekly breakfast idea. We can set up a standing Tuesday order with rotating seasonal items. Want me to send a sample menu?",
+    recipient: 'Rahman Traders',
+    title: 'Weekly wholesale',
+    body: "Rahman — love the weekly wholesale idea. We can set up a standing Tuesday order with rotating seasonal kurtis. Want me to send a sample pack?",
     status: 'waiting',
   },
 ]
@@ -215,8 +237,8 @@ export const CONTENT_POSTS: ContentPost[] = [
     platform: 'Instagram',
     author: 'Freya',
     status: 'published',
-    caption: 'What running a small bakery taught me about community. A short reflection on 3 years of feeding our neighborhood.',
-    image: BAKERY.cozyCafe,
+    caption: 'What running a Dhanmondi boutique taught me about community. A short reflection on 3 years of dressing our neighbourhood.',
+    image: BOUTIQUE.storefront,
     date: 'Wed 8 Jul · 9:00',
     likes: 156,
     views: 4200,
@@ -228,8 +250,8 @@ export const CONTENT_POSTS: ContentPost[] = [
     platform: 'Facebook',
     author: 'Freya',
     status: 'published',
-    caption: 'Fresh out of the oven — our Saturday sourdough loaves. Come early, they go fast 🍞',
-    image: BAKERY.sourdough,
+    caption: 'Fresh on the rack — our Saturday jamdani drop. Come early, they go fast ✨',
+    image: BOUTIQUE.sareeDisplay,
     date: 'Tue 7 Jul · 8:30',
     likes: 98,
     views: 2800,
@@ -241,8 +263,8 @@ export const CONTENT_POSTS: ContentPost[] = [
     platform: 'Instagram',
     author: 'You',
     status: 'published',
-    caption: 'Behind the scenes: laminating croissant dough at 5am. Worth every fold.',
-    image: BAKERY.laminatedPastry,
+    caption: 'Behind the scenes: hand-finishing kurtis at 5am. Worth every stitch.',
+    image: BOUTIQUE.embroidery,
     date: 'Mon 6 Jul · 7:15',
     likes: 142,
     views: 3600,
@@ -250,11 +272,11 @@ export const CONTENT_POSTS: ContentPost[] = [
   },
   {
     id: 'p4',
-    platform: 'LinkedIn',
+    platform: 'Facebook',
     author: 'Freya',
     status: 'scheduled',
-    caption: 'How local bakeries can partner with event planners — a few lessons from our Chamber breakfast.',
-    image: BAKERY.breakfastCatering,
+    caption: 'How local boutiques can partner with event planners — a few lessons from our Chamber reception.',
+    image: BOUTIQUE.shoppingBag,
     date: 'Thu 16 Jul · 10:00',
     likes: 0,
     views: 0,
@@ -265,8 +287,8 @@ export const CONTENT_POSTS: ContentPost[] = [
     platform: 'Instagram',
     author: 'Freya',
     status: 'draft',
-    caption: 'NEW: our summer berry tart is here 🫐 Limited batch this weekend only.',
-    image: BAKERY.berryTart,
+    caption: 'NEW: our summer linen kurtis are here ☀️ Limited colours this weekend only.',
+    image: BOUTIQUE.eidCollection,
     date: 'Draft',
     likes: 0,
     views: 0,
@@ -277,8 +299,8 @@ export const CONTENT_POSTS: ContentPost[] = [
     platform: 'Instagram',
     author: 'Freya',
     status: 'published',
-    caption: 'Weekend special: buy any pastry, get a coffee half off. Tell a friend ☕',
-    image: BAKERY.coffeeAndPastry,
+    caption: 'Weekend special: buy any embroidered kurti, get a free dupatta. Tell a friend 💛',
+    image: BOUTIQUE.accessories,
     date: 'Sat 4 Jul · 11:00',
     likes: 88,
     views: 2100,
@@ -290,7 +312,7 @@ export const CONTENT_POSTS: ContentPost[] = [
     author: 'You',
     status: 'published',
     caption: 'Saturday morning line already forming — thank you for making this place home.',
-    image: BAKERY.bakeryCounter,
+    image: BOUTIQUE.boutiqueCounter,
     date: 'Sat 4 Jul · 9:00',
     likes: 74,
     views: 1900,
@@ -301,8 +323,8 @@ export const CONTENT_POSTS: ContentPost[] = [
     platform: 'Instagram',
     author: 'Freya',
     status: 'published',
-    caption: 'Close-up of our berry danish. Food photography tip: natural light + one berry on the side.',
-    image: BAKERY.berryCake,
+    caption: 'Close-up of our jamdani weave. Photo tip: natural light + one earring on the side.',
+    image: BOUTIQUE.jewelry,
     date: 'Fri 3 Jul · 14:00',
     likes: 201,
     views: 5100,
@@ -315,17 +337,17 @@ export const CALENDAR_EVENTS: {
   title: string
   color: 'pink' | 'blue' | 'mint' | 'amber' | 'coral'
 }[] = [
-  { day: 14, title: 'Fresh sourdough', color: 'amber' },
+  { day: 14, title: 'Fresh saree', color: 'amber' },
   { day: 15, title: 'Weekend special', color: 'coral' },
-  { day: 16, title: 'Summer berry drop', color: 'pink' },
-  { day: 16, title: 'Oven BTS story', color: 'coral' },
+  { day: 16, title: 'Summer linen drop', color: 'pink' },
+  { day: 16, title: 'Rack BTS story', color: 'coral' },
   { day: 16, title: 'Flash sale reminder', color: 'amber' },
   { day: 16, title: 'Closing thank-you', color: 'mint' },
   { day: 18, title: 'Saturday morning', color: 'mint' },
-  { day: 21, title: 'Fresh sourdough', color: 'amber' },
+  { day: 21, title: 'Fresh saree', color: 'amber' },
   { day: 21, title: 'Weekend special', color: 'blue' },
   { day: 23, title: 'Meet the team', color: 'coral' },
-  { day: 25, title: 'Chamber breakfast', color: 'mint' },
+  { day: 25, title: 'Chamber reception', color: 'mint' },
   { day: 28, title: 'Flash sale Friday', color: 'pink' },
 ]
 
@@ -355,12 +377,12 @@ export const CAMPAIGNS: Campaign[] = [
     clicks: 512,
     leads: 18,
     goal: 'Get more people into the shop for spring.',
-    audience: 'Locals within 5km who love fresh baked goods.',
+    audience: 'Locals within 5km who love handcrafted fashion.',
     platforms: ['Instagram', 'Facebook'],
-    budget: '$200',
+    budget: '৳8,000',
     reachProgress: 100,
     report:
-      'Your Spring Bloom Sale reached 6,800 people. 512 clicked through to your menu, and 18 of them became new leads. Your weekend special post was the star — it pulled in most of the clicks.',
+      'Your Spring Bloom Sale reached 6,800 people. 512 clicked through to your shop, and 18 of them became new leads. Your weekend special post was the star — it pulled in most of the clicks.',
     engagementInsight:
       'Engagement is trending up — your campaign is gaining momentum. Keep posting consistently.',
     interactions30d: 8415,
@@ -371,46 +393,46 @@ export const CAMPAIGNS: Campaign[] = [
       objective: 'Foot traffic',
       platform: 'Meta',
       format: 'Single image + carousel',
-      audience: 'Interest: bakery, 18-45, 5km radius',
+      audience: 'Interest: boutique fashion, 18-45, 5km radius',
       schedule: 'Daily 8-10am',
-      budget: 'Organic boosted $200',
+      budget: 'Organic boosted ৳8,000',
       tone: 'Warm, local, inviting',
     },
     posts: [
       {
         id: 'cp1',
-        image: BAKERY.sourdough,
-        caption: 'Fresh sourdough just out of the oven 🥖 Come grab...',
+        image: BOUTIQUE.sareeDisplay,
+        caption: 'Fresh jamdani just on the rack ✨ Come grab...',
       },
       {
         id: 'cp2',
-        image: BAKERY.coffeeAndPastry,
-        caption: 'Weekend special: buy any 2 pastries, get a free coffee...',
+        image: BOUTIQUE.accessories,
+        caption: 'Weekend special: buy any 2 kurtis, get a free dupatta...',
       },
       {
         id: 'cp3',
-        image: BAKERY.croissants,
-        caption: 'Behind the scenes: how our croissants get those perfe...',
+        image: BOUTIQUE.kurtiRack,
+        caption: 'Behind the scenes: how our kurtis get those perfe...',
       },
     ],
   },
   {
     id: 'c2',
-    title: 'New Menu Teaser',
+    title: 'Eid Collection Teaser',
     description: 'Build buzz for the seasonal drop',
     summary: 'Running across Instagram Stories + feed. 2 drafts waiting for your OK.',
     status: 'running',
-    iconColor: '#ede9fe',
+    iconColor: '#e0f2fe',
     reach: 2400,
     clicks: 186,
     leads: 7,
-    goal: 'Build curiosity for the new seasonal menu.',
-    audience: 'Existing followers + lookalikes who engage with food content.',
+    goal: 'Build curiosity for the new Eid collection.',
+    audience: 'Existing followers + lookalikes who engage with fashion content.',
     platforms: ['Instagram', 'Facebook'],
-    budget: '$150',
+    budget: '৳6,000',
     reachProgress: 48,
     report:
-      "New Menu Teaser is live. You've reached 2,400 people so far — Stories are outperforming feed. Two draft posts are waiting for your OK before the next wave.",
+      "Eid Collection Teaser is live. You've reached 2,400 people so far — Stories are outperforming feed. Two draft posts are waiting for your OK before the next wave.",
     engagementInsight: 'Early momentum looks solid. Approve the next drafts to keep the teaser rolling.',
     interactions30d: 3120,
     bestDay: '14 Jul · 298',
@@ -429,41 +451,41 @@ export const CAMPAIGNS: Campaign[] = [
       objective: 'Awareness',
       platform: 'Instagram',
       format: 'Stories + feed',
-      audience: 'Followers + food lookalikes, 18-40',
+      audience: 'Followers + fashion lookalikes, 18-40',
       schedule: 'Tue / Thu / Sat mornings',
-      budget: 'Boosted $150',
+      budget: 'Boosted ৳6,000',
       tone: 'Excited, mysterious, playful',
     },
     posts: [
       {
         id: 'cp4',
-        image: BAKERY.berryTart,
-        caption: 'Something berry special is coming... can you guess? 🫐',
+        image: BOUTIQUE.eidCollection,
+        caption: 'Something jewel-toned is coming... can you guess? ✨',
       },
       {
         id: 'cp5',
-        image: BAKERY.coffeeAndPastry,
-        caption: 'Hint #2: it pairs perfectly with morning coffee ☕',
+        image: BOUTIQUE.accessories,
+        caption: 'Hint #2: it pairs perfectly with gold jewellery 💛',
       },
     ],
   },
   {
     id: 'c3',
-    title: 'Corporate Breakfast Push',
-    description: 'Attract office catering orders',
+    title: 'Corporate Gift Push',
+    description: 'Attract office festive-pack orders',
     summary: 'Draft ready — Freya built the audience and creative. Launch when you approve.',
     status: 'draft',
     iconColor: '#dcfce7',
     reach: 0,
     clicks: 0,
     leads: 0,
-    goal: 'Win weekly corporate breakfast catering deals.',
+    goal: 'Win weekly corporate festive gift-pack deals.',
     audience: 'Office managers and event planners within 10km.',
-    platforms: ['LinkedIn', 'Facebook'],
-    budget: '$250',
+    platforms: ['Facebook', 'Messenger'],
+    budget: '৳10,000',
     reachProgress: 0,
     report:
-      "Corporate Breakfast Push is ready to launch. Freya built the audience, creative, and schedule — tap Launch when you're happy with the setup.",
+      "Corporate Gift Push is ready to launch. Freya built the audience, creative, and schedule — tap Launch when you're happy with the setup.",
     engagementInsight: 'No live data yet — launch to start tracking engagement.',
     interactions30d: 0,
     bestDay: '—',
@@ -476,18 +498,18 @@ export const CAMPAIGNS: Campaign[] = [
     ],
     setup: {
       objective: 'Lead gen',
-      platform: 'LinkedIn + Facebook',
+      platform: 'Facebook + Messenger',
       format: 'Carousel + lead form',
       audience: 'Office managers, 25-55, 10km',
       schedule: 'Mon–Wed 7-9am',
-      budget: 'Boosted $250',
-      tone: 'Professional, reliable, delicious',
+      budget: 'Boosted ৳10,000',
+      tone: 'Professional, reliable, thoughtful',
     },
     posts: [
       {
         id: 'cp6',
-        image: BAKERY.breakfastCatering,
-        caption: 'Fuel your team mornings — catering from $12/person...',
+        image: BOUTIQUE.shoppingBag,
+        caption: 'Delight your team — festive packs from ৳1,200/person...',
       },
     ],
   },
@@ -504,7 +526,7 @@ export const CAMPAIGNS: Campaign[] = [
     goal: 'Bring regulars back with a simple stamp-card reward.',
     audience: 'Past customers who visited 2+ times in the last 90 days.',
     platforms: ['Instagram', 'Facebook'],
-    budget: '$100',
+    budget: '৳4,000',
     reachProgress: 35,
     report:
       'Loyalty Rewards Soft Launch reached 1,100 people before you paused it. 64 clicked through. Resume when the stamp-card offer is locked in.',
@@ -528,35 +550,35 @@ export const CAMPAIGNS: Campaign[] = [
       format: 'Single image + story',
       audience: 'Past customers, 2+ visits / 90 days',
       schedule: 'Fri–Sun afternoons',
-      budget: 'Boosted $100',
+      budget: 'Boosted ৳4,000',
       tone: 'Friendly, grateful, rewarding',
     },
     posts: [
       {
         id: 'cp7',
-        image: BAKERY.cinnamonRoll,
-        caption: 'Buy 9, get your 10th pastry free ☕ Stamp card starts this week...',
+        image: BOUTIQUE.fabricClose,
+        caption: 'Buy 9, get your 10th embroidery free 💛 Stamp card starts this week...',
       },
     ],
   },
 ]
 
-export const ICON_COLORS = ['#dbeafe', '#ede9fe', '#dcfce7', '#ffedd5', '#fce7f3', '#e0e7ff']
+export const ICON_COLORS = ['#dbeafe', '#e0f2fe', '#dcfce7', '#ffedd5', '#fce7f3', '#ccfbf1']
 
 export const FREYA_ACTIVITY = [
   {
     color: 'green' as const,
-    title: 'Drafted a new Instagram post for the New Menu Teaser',
+    title: 'Drafted a new Instagram post for the Eid Collection Teaser',
     sub: 'Caption + image ready for your approval.',
   },
   {
     color: 'green' as const,
-    title: 'Found a new lead on LinkedIn: Marcus Rivera',
+    title: 'Found a new lead on WhatsApp: Karim Hossain',
     sub: 'Local event planner, matches your ideal customer.',
   },
   {
     color: 'yellow' as const,
-    title: 'Drafted a reply to Priya Patel',
+    title: 'Drafted a reply to Fahim Ahmed',
     sub: 'Waiting for your approval before sending.',
   },
   {
@@ -567,12 +589,12 @@ export const FREYA_ACTIVITY = [
 ]
 
 export const HOT_LEADS = [
-  { name: 'Sarah Chen', status: 'New', note: 'Wants to book a corporate breakfast order...', color: '#3b82f6' },
-  { name: 'Priya Patel', status: 'Contacted', note: 'Wedding cake inquiry — 80 guests...', color: '#8b5cf6' },
-  { name: 'Elena Vasquez', status: 'New', note: 'Asked about gluten-free catering...', color: '#f97316' },
-  { name: 'Aisha Khan', status: 'Warm', note: 'Interested in weekly office pastries...', color: '#1e40af' },
-  { name: 'Diego Santos', status: 'New', note: 'Film set craft-service pastries...', color: '#ec4899' },
-  { name: 'Olivia Brooks', status: 'Contacted', note: 'Weekly breakfast standing order...', color: '#ea580c' },
+  { name: 'Sadia Khan', status: 'New', note: 'Wants to book a corporate gift pack...', color: '#3b82f6' },
+  { name: 'Fahim Ahmed', status: 'Contacted', note: 'Bridal lehenga inquiry — 80 guests...', color: '#0ea5e9' },
+  { name: 'Nadia Hasan', status: 'New', note: 'Asked about custom saree for a shoot...', color: '#f97316' },
+  { name: 'Aisha Khan', status: 'Warm', note: 'Interested in monthly styling box...', color: '#1e40af' },
+  { name: 'Karim Hossain', status: 'New', note: 'Film-day wardrobe boxes...', color: '#ec4899' },
+  { name: 'Rahman Traders', status: 'Contacted', note: 'Weekly wholesale standing order...', color: '#ea580c' },
 ]
 
 export const STORIES: {
@@ -582,11 +604,11 @@ export const STORIES: {
   postId?: string
 }[] = [
   { id: 'create', label: 'Create', image: null },
-  { id: 's1', label: 'Freya', image: BAKERY.breakfastCatering, postId: 'p4' },
-  { id: 's2', label: 'You', image: BAKERY.coffeeAndPastry, postId: 'p6' },
-  { id: 's3', label: 'Freya', image: BAKERY.cozyCafe, postId: 'p1' },
-  { id: 's4', label: 'Freya', image: BAKERY.sourdough, postId: 'p2' },
-  { id: 's5', label: 'You', image: BAKERY.laminatedPastry, postId: 'p3' },
-  { id: 's6', label: 'Freya', image: BAKERY.berryTart, postId: 'p5' },
-  { id: 's7', label: 'Freya', image: BAKERY.bakeryCounter, postId: 'p7' },
+  { id: 's1', label: 'Freya', image: BOUTIQUE.shoppingBag, postId: 'p4' },
+  { id: 's2', label: 'You', image: BOUTIQUE.accessories, postId: 'p6' },
+  { id: 's3', label: 'Freya', image: BOUTIQUE.storefront, postId: 'p1' },
+  { id: 's4', label: 'Freya', image: BOUTIQUE.sareeDisplay, postId: 'p2' },
+  { id: 's5', label: 'You', image: BOUTIQUE.embroidery, postId: 'p3' },
+  { id: 's6', label: 'Freya', image: BOUTIQUE.eidCollection, postId: 'p5' },
+  { id: 's7', label: 'Freya', image: BOUTIQUE.boutiqueCounter, postId: 'p7' },
 ]

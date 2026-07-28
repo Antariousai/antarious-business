@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -11,8 +12,13 @@ import {
   type FreyaActivityItem,
   type FreyaActivityStatus,
 } from '../data/freyaActivityData'
+import { apiFetch } from '@/lib/backend/api'
+import { approveFreyaActivities } from '@/lib/backend/freyaChat'
+import { mapApiActivity } from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { hasSupabaseEnv } from '@/lib/backend/mode'
 
-const STORAGE_KEY = 'antarious-freya-activity-v3'
+const STORAGE_KEY = 'antarious-freya-activity-v4-bd'
 
 function load(): FreyaActivityItem[] {
   try {
@@ -47,6 +53,7 @@ interface FreyaActivityContextValue {
   dismiss: (id: string) => void
   prepend: (item: FreyaActivityItem) => void
   resetDemo: () => void
+  refresh: () => Promise<void>
   panelOpen: boolean
   panelTab: FreyaPanelTab
   openPanel: (tab?: FreyaPanelTab) => void
@@ -57,21 +64,72 @@ interface FreyaActivityContextValue {
 const FreyaActivityContext = createContext<FreyaActivityContextValue | null>(null)
 
 export function FreyaActivityProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<FreyaActivityItem[]>(() => load())
+  const { backend, ready } = useBackendMode()
+  const [items, setItems] = useState<FreyaActivityItem[]>([])
   const [filter, setFilter] = useState<ActivityFilter>('everything')
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<FreyaPanelTab>('chat')
 
-  const persist = useCallback((updater: (prev: FreyaActivityItem[]) => FreyaActivityItem[]) => {
-    setItems((prev) => {
-      const next = updater(prev)
-      save(next)
-      return next
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const data = await apiFetch<{ items: Parameters<typeof mapApiActivity>[0][] }>(
+      '/api/freya/activity',
+    )
+    setItems((data.items ?? []).map(mapApiActivity))
+  }, [backend])
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      if (hasSupabaseEnv()) {
+        setItems([])
+        return
+      }
+      setItems(load())
+      return
+    }
+    let cancelled = false
+    void refresh().catch(() => {
+      if (!cancelled) setItems([])
     })
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
+
+  const persist = useCallback(
+    (updater: (prev: FreyaActivityItem[]) => FreyaActivityItem[]) => {
+      setItems((prev) => {
+        const next = updater(prev)
+        if (!backend) save(next)
+        return next
+      })
+    },
+    [backend],
+  )
 
   const approve = useCallback(
     (id: string) => {
+      if (backend) {
+        void approveFreyaActivities({ id })
+          .then(() => refresh())
+          .catch(() => {
+            /* keep UI; user can retry */
+          })
+        setItems((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  status: 'done' as FreyaActivityStatus,
+                  detail: 'Approved — Freya applied this.',
+                  time: 'Just now',
+                }
+              : item,
+          ),
+        )
+        return
+      }
       persist((prev) =>
         prev.map((item) =>
           item.id === id
@@ -85,15 +143,33 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
         ),
       )
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const approveAll = useCallback(() => {
-    let count = 0
+    const waiting = items.filter((i) => i.status === 'waiting')
+    const count = waiting.length
+    if (backend) {
+      void approveFreyaActivities({ approveAll: true })
+        .then(() => refresh())
+        .catch(() => {})
+      setItems((prev) =>
+        prev.map((item) =>
+          item.status !== 'waiting'
+            ? item
+            : {
+                ...item,
+                status: 'done' as FreyaActivityStatus,
+                detail: 'Approved — Freya applied this.',
+                time: 'Just now',
+              },
+        ),
+      )
+      return count
+    }
     persist((prev) =>
       prev.map((item) => {
         if (item.status !== 'waiting') return item
-        count += 1
         return {
           ...item,
           status: 'done' as FreyaActivityStatus,
@@ -103,13 +179,20 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
       }),
     )
     return count
-  }, [persist])
+  }, [backend, items, persist, refresh])
 
   const dismiss = useCallback(
     (id: string) => {
+      if (backend) {
+        void apiFetch(`/api/freya/activity?id=${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        }).then(() => refresh())
+        setItems((prev) => prev.filter((item) => item.id !== id))
+        return
+      }
       persist((prev) => prev.filter((item) => item.id !== id))
     },
-    [persist],
+    [backend, persist, refresh],
   )
 
   const prepend = useCallback(
@@ -120,11 +203,15 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
   )
 
   const resetDemo = useCallback(() => {
+    if (backend) {
+      void refresh()
+      return
+    }
     const fresh = structuredClone(SEED_FREYA_ACTIVITY)
     save(fresh)
     setItems(fresh)
     setFilter('everything')
-  }, [])
+  }, [backend, refresh])
 
   const openPanel = useCallback((tab: FreyaPanelTab = 'chat') => {
     setPanelTab(tab)
@@ -158,6 +245,7 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
       dismiss,
       prepend,
       resetDemo,
+      refresh,
       panelOpen,
       panelTab,
       openPanel,
@@ -176,6 +264,7 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
       dismiss,
       prepend,
       resetDemo,
+      refresh,
       panelOpen,
       panelTab,
       openPanel,

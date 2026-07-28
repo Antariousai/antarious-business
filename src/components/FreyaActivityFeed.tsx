@@ -197,7 +197,7 @@ function ActivityCard({
               {item.title}
             </h4>
             {item.storyId && (
-              <span className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700">
+              <span className="shrink-0 rounded-full bg-sky-soft px-2 py-0.5 text-[10px] font-bold text-sky-bright">
                 Story {item.storyStep}/4
               </span>
             )}

@@ -165,13 +165,13 @@ export function parseFreyaIntent(raw: string, ctx: FreyaIntentContext): FreyaInt
   if (/team|seat|invite/.test(text)) {
     if (ctx.planTier !== 'scale') {
       return {
-        reply: `${p} Team invites unlock on Scale. Extra seats are $7/mo each when you're ready — for now it's just you and me.`,
+        reply: `${p} Team invites unlock on Scale. Extra seats are ৳499/mo each when you're ready — for now it's just you and me.`,
         navigate: '/app',
         actions: ['closePanel'],
       }
     }
     return {
-      reply: `${p} Opening Team — invite people at $7/seat/mo beyond the owner.`,
+      reply: `${p} Opening Team — invite people at ৳499/seat/mo beyond the owner.`,
       navigate: '/app/team',
       actions: ['closePanel'],
     }

@@ -1,5 +1,9 @@
-import logoWhite from '../assets/antarious-logo.png'
-import logoDark from '../assets/antarious-logo-dark.png'
+import logoWhiteImg from '../assets/antarious-logo.png'
+import logoDarkImg from '../assets/antarious-logo-dark.png'
+import { assetSrc } from '../lib/assetSrc'
+
+const logoWhite = assetSrc(logoWhiteImg)
+const logoDark = assetSrc(logoDarkImg)
 
 export function LogoMark({ size = 36 }: { size?: number }) {
   return (

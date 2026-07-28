@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { ChevronDown, Mail, Pencil, Flame, Sun, Snowflake } from 'lucide-react'
 import { Avatar } from './Avatar'
+import { PlatformChip, PlatformIcon } from './PlatformIcon'
 import { LEAD_STAGES, LEAD_TAG_COLORS, type Lead } from '../data/leadsData'
 import { useLeads } from '../context/LeadsContext'
 
@@ -51,7 +52,9 @@ function LeadDetails({
         </div>
         <div className="rounded-xl bg-slate-50 px-3 py-2">
           <dt className="text-[10px] font-bold tracking-wide text-slate-400 uppercase">Platform</dt>
-          <dd className="mt-0.5 text-[12.5px] font-semibold capitalize text-ink">{lead.platform}</dd>
+          <dd className="mt-0.5 text-[12.5px] font-semibold text-ink">
+            <PlatformChip platform={lead.platform} className="capitalize" />
+          </dd>
         </div>
         <div className="rounded-xl bg-slate-50 px-3 py-2">
           <dt className="text-[10px] font-bold tracking-wide text-slate-400 uppercase">Stage</dt>
@@ -272,7 +275,10 @@ export function LeadContactRow({
               <span className="mx-1.5 text-slate-300">·</span>
               {sourceLabel(lead.source)}
               <span className="mx-1.5 text-slate-300">·</span>
-              <span className="capitalize">{lead.platform}</span>
+              <span className="inline-flex items-center gap-1 capitalize">
+                <PlatformIcon platform={lead.platform} size={12} />
+                {lead.platform}
+              </span>
             </div>
             {!expanded && lead.note && (
               <p className="mt-1 line-clamp-1 text-[12px] text-slate-500">{lead.note}</p>

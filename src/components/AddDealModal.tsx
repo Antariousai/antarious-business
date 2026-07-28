@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
+import { useApp } from '../context/AppContext'
 import { usePipeline } from '../context/PipelineContext'
 import { DEAL_STAGES, type DealPriority, type DealStage } from '../data/pipelineData'
 import type { CrmSegment } from '../data/crmData'
-import { freyaFillDeal } from '../lib/freyaCreationHelpers'
+import { freyaFillDeal, type FreyaBizContext } from '../lib/freyaCreationHelpers'
 
 export function AddDealModal({
   onClose,
@@ -14,6 +15,15 @@ export function AddDealModal({
   defaultStage?: DealStage
 }) {
   const { addDeal } = usePipeline()
+  const { profile, prefs } = useApp()
+  const bizCtx: FreyaBizContext = {
+    businessName: profile?.businessName,
+    industry: profile?.industry,
+    customers: profile?.customers,
+    goals: profile?.goals,
+    platforms: profile?.platforms,
+    tone: prefs.tone,
+  }
   const [prompt, setPrompt] = useState('')
   const [leaveToFreya, setLeaveToFreya] = useState(false)
   const [title, setTitle] = useState('')
@@ -25,7 +35,7 @@ export function AddDealModal({
   const [priority, setPriority] = useState<DealPriority>('medium')
   const [segment, setSegment] = useState<CrmSegment>('b2b')
   const [product, setProduct] = useState('Custom')
-  const [owner, setOwner] = useState('Joy')
+  const [owner, setOwner] = useState(profile?.ownerName || 'You')
   const [closeDate, setCloseDate] = useState(
     () => new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
   )
@@ -38,7 +48,7 @@ export function AddDealModal({
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
-      const filled = freyaFillDeal(prompt, segment)
+      const filled = freyaFillDeal(prompt, segment, bizCtx)
       setTitle(filled.title)
       setCompany(filled.company)
       setContact(filled.contact)
@@ -55,7 +65,7 @@ export function AddDealModal({
     e.preventDefault()
     setBuilding(true)
 
-    const filled = leaveToFreya ? freyaFillDeal(prompt, segment) : null
+    const filled = leaveToFreya ? freyaFillDeal(prompt, segment, bizCtx) : null
     const dealTitle = (filled?.title || title).trim()
     if (!dealTitle) {
       setBuilding(false)
@@ -109,7 +119,7 @@ export function AddDealModal({
             applying={applying}
             disabled={busy}
             applyLabel="Freya, fill deal from prompt"
-            placeholder="e.g. Corporate catering for 40 people next month — $2k budget"
+            placeholder="e.g. Wholesale kurtis for 40 pieces next month — ৳48,000 budget"
           />
 
           {leaveToFreya ? (
@@ -141,7 +151,7 @@ export function AddDealModal({
                   onChange={(e) => setTitle(e.target.value)}
                   required={!leaveToFreya}
                   autoFocus
-                  placeholder={segment === 'b2c' ? 'e.g. Birthday cake for Maya' : 'e.g. Wedding cake package'}
+                  placeholder={segment === 'b2c' ? 'e.g. Birthday saree for Maya' : 'e.g. Bridal lehenga package'}
                   className="h-11 w-full rounded-lg border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
                 />
               </div>

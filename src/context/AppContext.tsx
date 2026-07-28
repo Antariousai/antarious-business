@@ -4,6 +4,7 @@ import {
   useMemo,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from 'react'
 import type { BusinessProfile, GoalId, Platform } from '../data/mockData'
@@ -20,11 +21,15 @@ import {
   type PlanEntitlements,
 } from '../data/planTiers'
 import { clearAntariousStorage } from '../lib/clearAntariousStorage'
+import { asPlatform } from '@/lib/backend/mappers'
+import { apiFetch } from '@/lib/backend/api'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { hasSupabaseEnv } from '@/lib/backend/mode'
 
 /** Keep in sync with STEPS in FreyaTour.tsx */
 const FREYA_TOUR_LENGTH = 3
 
-const STORAGE_KEY = 'antarious-demo-v2'
+const STORAGE_KEY = 'antarious-demo-v3-bd'
 
 export type FreyaTone = 'warm' | 'professional' | 'playful'
 
@@ -67,11 +72,22 @@ interface StoredState {
   billing: BillingDemo
 }
 
+type MeResponse = {
+  profile: BusinessProfile
+  onboarded: boolean
+  prefs: FreyaPrefs
+  credits: number
+  planTier: PlanTier
+  billing?: BillingDemo
+}
+
 function normalizeProfile(profile: BusinessProfile | null): BusinessProfile | null {
   if (!profile) return null
   return {
     ...profile,
     planTier: profile.planTier ?? 'starter',
+    goals: (profile.goals ?? []) as GoalId[],
+    platforms: (profile.platforms ?? []) as Platform[],
   }
 }
 
@@ -130,6 +146,8 @@ interface AppContextValue {
   entitlements: PlanEntitlements
   seatLimit: number
   aiCreditsRemaining: number
+  /** True once demo localStorage or /api/me hydration finished. */
+  hydrated: boolean
   canAccess: (module: AppModule) => boolean
   canAccessRoute: (pathname: string) => boolean
   setPlanTier: (tier: PlanTier) => void
@@ -138,6 +156,8 @@ interface AppContextValue {
   buyAiCreditPack: (packId: AiCreditPackId) => void
   resetAiCreditsDemo: () => void
   login: (name: string) => void
+  /** After Supabase auth — load org profile from /api/me. */
+  hydrateFromBackend: () => Promise<MeResponse | null>
   completeOnboarding: (data: Omit<BusinessProfile, 'ownerName'>) => void
   logout: () => void
   updateGoals: (goals: GoalId[]) => void
@@ -154,39 +174,110 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const initial = loadState()
-  const [profile, setProfile] = useState<BusinessProfile | null>(initial.profile)
-  const [onboarded, setOnboarded] = useState(initial.onboarded)
-  const [prefs, setPrefs] = useState<FreyaPrefs>(initial.prefs)
-  const [billing, setBilling] = useState<BillingDemo>(initial.billing)
+  const { backend, ready: backendReady, envConfigured } = useBackendMode()
+  const [profile, setProfile] = useState<BusinessProfile | null>(null)
+  const [onboarded, setOnboarded] = useState(false)
+  const [prefs, setPrefs] = useState<FreyaPrefs>({ ...DEFAULT_PREFS })
+  const [billing, setBilling] = useState<BillingDemo>({ ...DEFAULT_BILLING })
+  const [serverCredits, setServerCredits] = useState<number | null>(null)
+  const [hydrated, setHydrated] = useState(false)
+
+  const applyMe = useCallback((me: MeResponse) => {
+    const nextProfile = normalizeProfile({
+      ...me.profile,
+      planTier: me.planTier ?? me.profile.planTier ?? 'starter',
+      platforms: (me.profile.platforms ?? []).map((p) => asPlatform(p)),
+    })
+    setProfile(nextProfile)
+    setOnboarded(me.onboarded)
+    setPrefs({
+      ...DEFAULT_PREFS,
+      ...me.prefs,
+      connectedPlatforms: (me.prefs.connectedPlatforms ?? []).map((p) => asPlatform(p)),
+    })
+    setServerCredits(me.credits)
+    setBilling(
+      normalizeBilling(
+        me.billing ?? {
+          purchasedSeats: 3,
+          aiCreditsUsed: 0,
+          aiCreditsPurchased: Math.max(0, me.credits),
+        },
+      ),
+    )
+  }, [])
+
+  const hydrateFromBackend = useCallback(async () => {
+    try {
+      const me = await apiFetch<MeResponse>('/api/me')
+      applyMe(me)
+      setHydrated(true)
+      return me
+    } catch {
+      setProfile(null)
+      setOnboarded(false)
+      setPrefs({ ...DEFAULT_PREFS })
+      setBilling({ ...DEFAULT_BILLING })
+      setServerCredits(null)
+      setHydrated(true)
+      return null
+    }
+  }, [applyMe])
+
+  useEffect(() => {
+    if (!backendReady) return
+    if (!backend) {
+      if (envConfigured) {
+        // Env present but no session — stay logged out (don't revive demo storage).
+        setProfile(null)
+        setOnboarded(false)
+        setPrefs({ ...DEFAULT_PREFS })
+        setBilling({ ...DEFAULT_BILLING })
+        setServerCredits(null)
+        setHydrated(true)
+        return
+      }
+      const initial = loadState()
+      setProfile(initial.profile)
+      setOnboarded(initial.onboarded)
+      setPrefs(initial.prefs)
+      setBilling(initial.billing)
+      setServerCredits(null)
+      setHydrated(true)
+      return
+    }
+    void hydrateFromBackend()
+  }, [backend, backendReady, envConfigured, hydrateFromBackend])
 
   const planTier: PlanTier = profile?.planTier ?? 'starter'
   const entitlements = getEntitlements(planTier)
   const seatLimit = billing.purchasedSeats
-  const aiCreditsRemaining = aiCreditBalance(
-    planTier,
-    billing.aiCreditsPurchased,
-    billing.aiCreditsUsed,
-  )
+  const aiCreditsRemaining =
+    serverCredits !== null
+      ? serverCredits
+      : aiCreditBalance(planTier, billing.aiCreditsPurchased, billing.aiCreditsUsed)
 
-  const persist = useCallback((next: StoredState) => {
-    const normalized = {
-      ...next,
-      profile: normalizeProfile(next.profile),
-      billing: normalizeBilling(next.billing),
-    }
-    setProfile(normalized.profile)
-    setOnboarded(normalized.onboarded)
-    setPrefs(normalized.prefs)
-    setBilling(normalized.billing)
-    saveState(normalized)
-  }, [])
+  const persist = useCallback(
+    (next: StoredState) => {
+      const normalized = {
+        ...next,
+        profile: normalizeProfile(next.profile),
+        billing: normalizeBilling(next.billing),
+      }
+      setProfile(normalized.profile)
+      setOnboarded(normalized.onboarded)
+      setPrefs(normalized.prefs)
+      setBilling(normalized.billing)
+      if (!backend) saveState(normalized)
+    },
+    [backend],
+  )
 
   const login = useCallback(
     (name: string) => {
       persist({
         profile: {
-          ownerName: name.trim() || 'Joy',
+          ownerName: name.trim() || 'Nusrat',
           businessName: '',
           industry: '',
           customers: '',
@@ -198,13 +289,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
         prefs: { ...DEFAULT_PREFS },
         billing: { ...DEFAULT_BILLING },
       })
+      setHydrated(true)
     },
     [persist],
   )
 
   const completeOnboarding = useCallback(
     (data: Omit<BusinessProfile, 'ownerName'>) => {
-      const ownerName = profile?.ownerName || 'Joy'
+      const ownerName = profile?.ownerName || 'Nusrat'
+      if (backend) {
+        void apiFetch('/api/onboarding/complete', {
+          method: 'POST',
+          body: JSON.stringify({ ownerName, ...data }),
+        })
+          .then(() => hydrateFromBackend())
+          .catch(() => {
+            // Optimistic local so AuthGate can proceed
+            setProfile(normalizeProfile({ ownerName, ...data }))
+            setOnboarded(true)
+          })
+        setProfile(normalizeProfile({ ownerName, ...data, planTier: data.planTier ?? 'starter' }))
+        setOnboarded(true)
+        setPrefs((p) => ({
+          ...p,
+          connectedPlatforms: [],
+          tourCompleted: false,
+          tourActive: true,
+          tourStep: 0,
+        }))
+        return
+      }
       persist({
         profile: {
           ownerName,
@@ -222,7 +336,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         billing,
       })
     },
-    [persist, profile?.ownerName, prefs, billing],
+    [backend, billing, hydrateFromBackend, persist, prefs, profile?.ownerName],
   )
 
   const logout = useCallback(() => {
@@ -231,39 +345,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setOnboarded(false)
     setPrefs({ ...DEFAULT_PREFS })
     setBilling({ ...DEFAULT_BILLING })
-    window.location.assign('/')
+    setServerCredits(null)
+    void (async () => {
+      try {
+        if (hasSupabaseEnv()) {
+          const { createClient } = await import('@/lib/supabase/client')
+          await createClient().auth.signOut()
+        }
+      } catch {
+        // ignore
+      }
+      window.location.assign('/')
+    })()
   }, [])
 
   const updateGoals = useCallback(
     (goals: GoalId[]) => {
       if (!profile) return
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ profile: { goals } }),
+        })
+      }
       persist({ profile: { ...profile, goals }, onboarded, prefs, billing })
     },
-    [persist, profile, onboarded, prefs, billing],
+    [backend, persist, profile, onboarded, prefs, billing],
   )
 
   const updatePlatforms = useCallback(
     (platforms: Platform[]) => {
       if (!profile) return
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ profile: { platforms } }),
+        })
+      }
       persist({ profile: { ...profile, platforms }, onboarded, prefs, billing })
     },
-    [persist, profile, onboarded, prefs, billing],
+    [backend, persist, profile, onboarded, prefs, billing],
   )
 
   const updateProfile = useCallback(
     (patch: Partial<BusinessProfile>) => {
       if (!profile) return
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ profile: patch }),
+        })
+      }
       persist({ profile: { ...profile, ...patch }, onboarded, prefs, billing })
     },
-    [persist, profile, onboarded, prefs, billing],
+    [backend, persist, profile, onboarded, prefs, billing],
   )
 
   const setPlanTier = useCallback(
     (tier: PlanTier) => {
       if (!profile) return
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ profile: { planTier: tier } }),
+        })
+      }
       persist({ profile: { ...profile, planTier: tier }, onboarded, prefs, billing })
     },
-    [persist, profile, onboarded, prefs, billing],
+    [backend, persist, profile, onboarded, prefs, billing],
   )
 
   const setPurchasedSeats = useCallback(
@@ -284,6 +433,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const spendAiCredits = useCallback(
     (amount = 1) => {
       const need = Math.max(1, Math.floor(amount))
+      if (backend) {
+        // Server debits on agent routes; allow optimistic local decrement for UI.
+        if (serverCredits !== null && serverCredits < need) return false
+        setServerCredits((c) => (c === null ? c : Math.max(0, c - need)))
+        return true
+      }
       const remaining = aiCreditBalance(
         planTier,
         billing.aiCreditsPurchased,
@@ -298,13 +453,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })
       return true
     },
-    [persist, profile, onboarded, prefs, billing, planTier],
+    [backend, serverCredits, persist, profile, onboarded, prefs, billing, planTier],
   )
 
   const buyAiCreditPack = useCallback(
     (packId: AiCreditPackId) => {
       const pack = getAiCreditPack(packId)
       if (!pack) return
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ buyCreditPack: packId }),
+        }).then(() => hydrateFromBackend())
+        setServerCredits((c) => (c === null ? pack.credits : c + pack.credits))
+        return
+      }
       persist({
         profile,
         onboarded,
@@ -315,17 +478,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
       })
     },
-    [persist, profile, onboarded, prefs, billing],
+    [backend, hydrateFromBackend, persist, profile, onboarded, prefs, billing],
   )
 
   const resetAiCreditsDemo = useCallback(() => {
+    if (backend) return
     persist({
       profile,
       onboarded,
       prefs,
       billing: { ...billing, aiCreditsUsed: 0, aiCreditsPurchased: 0 },
     })
-  }, [persist, profile, onboarded, prefs, billing])
+  }, [backend, persist, profile, onboarded, prefs, billing])
 
   const canAccess = useCallback(
     (module: AppModule) => canAccessModule(planTier, module),
@@ -339,26 +503,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updatePrefs = useCallback(
     (patch: Partial<FreyaPrefs>) => {
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ prefs: patch }),
+        })
+      }
       persist({ profile, onboarded, prefs: { ...prefs, ...patch }, billing })
     },
-    [persist, profile, onboarded, prefs, billing],
+    [backend, persist, profile, onboarded, prefs, billing],
   )
 
   const connectPlatform = useCallback(
     (platform: Platform) => {
       if (prefs.connectedPlatforms.includes(platform)) return
-      updatePrefs({ connectedPlatforms: [...prefs.connectedPlatforms, platform] })
+      const nextConnected = [...prefs.connectedPlatforms, platform]
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ connectPlatform: platform }),
+        }).then(() => hydrateFromBackend())
+      }
+      persist({
+        profile,
+        onboarded,
+        prefs: { ...prefs, connectedPlatforms: nextConnected },
+        billing,
+      })
     },
-    [prefs.connectedPlatforms, updatePrefs],
+    [backend, prefs, profile, onboarded, billing, persist, hydrateFromBackend],
   )
 
   const disconnectPlatform = useCallback(
     (platform: Platform) => {
-      updatePrefs({
-        connectedPlatforms: prefs.connectedPlatforms.filter((p) => p !== platform),
+      const nextConnected = prefs.connectedPlatforms.filter((p) => p !== platform)
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({ disconnectPlatform: platform }),
+        }).then(() => hydrateFromBackend())
+      }
+      persist({
+        profile,
+        onboarded,
+        prefs: { ...prefs, connectedPlatforms: nextConnected },
+        billing,
       })
     },
-    [prefs.connectedPlatforms, updatePrefs],
+    [backend, prefs, profile, onboarded, billing, persist, hydrateFromBackend],
   )
 
   const startTour = useCallback(() => {
@@ -395,6 +587,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entitlements,
       seatLimit,
       aiCreditsRemaining,
+      hydrated,
       canAccess,
       canAccessRoute,
       setPlanTier,
@@ -403,6 +596,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       buyAiCreditPack,
       resetAiCreditsDemo,
       login,
+      hydrateFromBackend,
       completeOnboarding,
       logout,
       updateGoals,
@@ -424,6 +618,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entitlements,
       seatLimit,
       aiCreditsRemaining,
+      hydrated,
       canAccess,
       canAccessRoute,
       setPlanTier,
@@ -432,6 +627,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       buyAiCreditPack,
       resetAiCreditsDemo,
       login,
+      hydrateFromBackend,
       completeOnboarding,
       logout,
       updateGoals,

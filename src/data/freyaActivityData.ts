@@ -1,4 +1,4 @@
-import { BAKERY } from './mockData'
+import { BOUTIQUE } from './mockData'
 
 /** Freya's Activity — transparent log of what Freya is doing */
 
@@ -47,7 +47,7 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   // Story arc: campaign → lead → deal → invoice
   {
     id: 'fa-arc1',
-    title: 'New Menu Teaser campaign went live',
+    title: 'Eid Collection Teaser campaign went live',
     detail: 'Story 1/4 — reach + buzz. Next: Freya converted a warm lead.',
     status: 'done',
     area: 'campaigns',
@@ -58,8 +58,8 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   },
   {
     id: 'fa-arc2',
-    title: 'Converted Discover signal → lead: Marcus Rivera',
-    detail: 'Story 2/4 — event planner who engaged with the teaser.',
+    title: 'Converted Discover signal → lead: Karim Hossain',
+    detail: 'Story 2/4 — film producer who engaged with the teaser.',
     status: 'done',
     area: 'leads',
     time: '14 Jul, 16:40',
@@ -69,7 +69,7 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   },
   {
     id: 'fa-arc3',
-    title: 'Opened CRM deal: Chamber tasting for Marcus',
+    title: 'Opened CRM deal: Chamber fitting for Nora',
     detail: 'Story 3/4 — follow-up task drafted. Approve to lock it in.',
     status: 'waiting',
     area: 'crm',
@@ -81,8 +81,8 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   },
   {
     id: 'fa-arc4',
-    title: 'Draft invoice ready after tasting deposit',
-    detail: 'Story 4/4 — $545 deposit invoice for Priya still needs chase OK.',
+    title: 'Draft invoice ready after fitting deposit',
+    detail: 'Story 4/4 — ৳28,500 deposit invoice for Fahim still needs chase OK.',
     status: 'waiting',
     area: 'money',
     time: '16 Jul, 9:15',
@@ -95,7 +95,7 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   // Home-grade draft approvals (unified queue)
   {
     id: 'fa-a1',
-    title: 'New seasonal menu post',
+    title: 'New Eid collection post',
     detail: 'Caption + image ready for your approval.',
     status: 'waiting',
     area: 'content',
@@ -103,13 +103,13 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
     href: '/app/content',
     actionLabel: 'Approve post',
     kind: 'post',
-    previewImage: BAKERY.seasonalFruit,
+    previewImage: BOUTIQUE.seasonal,
     previewBody:
-      "New seasonal menu dropping next week 🍇 Can you guess what flavor we're adding? Hint: it's berry-licious.",
+      "New Eid collection dropping next week ✨ Can you guess the colour story? Hint: it's jewel-toned.",
   },
   {
     id: 'fa-a2',
-    title: 'Flash sale — bread loaves',
+    title: 'Flash sale — kurtis',
     detail: 'Friday 3pm promo draft waiting.',
     status: 'waiting',
     area: 'content',
@@ -117,14 +117,14 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
     href: '/app/content',
     actionLabel: 'Approve post',
     kind: 'post',
-    previewImage: BAKERY.freshBread,
+    previewImage: BOUTIQUE.windowDisplay,
     previewBody:
-      'Flash sale this Friday only — 20% off all bread loaves from 3pm to close. Set your reminder ⏰',
+      'Flash sale this Friday only — 20% off all kurtis from 3pm to close. Set your reminder ⏰',
   },
   {
     id: 'fa-a5',
     title: 'Drafted a reply to Priya Patel',
-    detail: 'Wedding cake inquiry — waiting for your OK before sending.',
+    detail: 'Bridal lehenga inquiry — waiting for your OK before sending.',
     status: 'waiting',
     area: 'inbox',
     time: '14 Jul, 10:00',
@@ -133,26 +133,26 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
     kind: 'message',
     recipient: 'Priya Patel',
     previewBody:
-      "Hi Priya! I'd love to help with your wedding cake. Could you share an approximate guest count and any dietary needs? Happy to suggest flavors that photograph beautifully too.",
+      "Hi Priya! I'd love to help with the bridal lehenga. Could you share an approximate guest count and preferred colours? Happy to suggest pieces that photograph beautifully too.",
   },
   {
     id: 'fa-a6',
-    title: 'Drafted a reply to Sarah Chen',
-    detail: 'Corporate catering options — ready to send.',
+    title: 'Drafted a reply to Sadia Khan',
+    detail: 'Corporate gift-pack options — ready to send.',
     status: 'waiting',
     area: 'inbox',
     time: '14 Jul, 9:20',
     href: '/app/inbox',
     actionLabel: 'Review in Inbox',
     kind: 'message',
-    recipient: 'Sarah Chen',
+    recipient: 'Sadia Khan',
     previewBody:
-      'Hi Sarah — thanks for reaching out! We have corporate breakfast packages starting at $12/person. Would Tuesday or Thursday work for a tasting?',
+      'Hi Sadia — thanks for reaching out! Custom jamdani sarees start around ৳12,500. Would Tuesday or Thursday work for a fitting?',
   },
 
   {
     id: 'fa-a7',
-    title: 'Saturday morning Reel — oven BTS',
+    title: 'Saturday morning Reel — rack BTS',
     detail: '15s Reel draft with trending audio — needs your OK.',
     status: 'waiting',
     area: 'content',
@@ -160,13 +160,13 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
     href: '/app/content',
     actionLabel: 'Approve post',
     kind: 'post',
-    previewImage: BAKERY.pastryChef,
+    previewImage: BOUTIQUE.customerMoment,
     previewBody:
-      '5am in the bakery 👨‍🍳 Watch the croissants puff. Come grab one warm — doors open at 7.',
+      '9am in the boutique ✂️ Watch the new kurtis hit the rack. Come try them on — doors open at 10.',
   },
   {
     id: 'fa1',
-    title: 'Drafted a new Instagram post for the New Menu Teaser',
+    title: 'Drafted a new Instagram post for the Eid Collection Teaser',
     detail: 'Caption + image ready — already in Content drafts.',
     status: 'done',
     area: 'content',
@@ -175,8 +175,8 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   },
   {
     id: 'fa2',
-    title: 'Found a new lead on LinkedIn: Marcus Rivera',
-    detail: 'Local event planner, matches your ideal customer.',
+    title: 'Found a new lead on WhatsApp: Karim Hossain',
+    detail: 'Local film producer, matches your ideal customer.',
     status: 'done',
     area: 'leads',
     time: '15 Jul, 17:00',
@@ -194,7 +194,7 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   {
     id: 'fa5',
     title: 'Logged 3 new sales from online orders',
-    detail: '$148 in, all marked paid.',
+    detail: '৳12,500 in, all marked paid.',
     status: 'done',
     area: 'money',
     time: '15 Jul, 20:00',
@@ -202,7 +202,7 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   },
   {
     id: 'fa7',
-    title: 'Matched Meta Ads bank transaction ($186)',
+    title: 'Matched Meta Ads bank transaction (৳4,500)',
     detail: 'Suggested category: Marketing. Confirm or change.',
     status: 'waiting',
     area: 'money',
@@ -230,7 +230,7 @@ export const SEED_FREYA_ACTIVITY: FreyaActivityItem[] = [
   },
   {
     id: 'fa11',
-    title: 'Drafting Stories for #FarmersMarketSaturday',
+    title: 'Drafting Stories for #DhanmondiSaturday',
     detail: 'Pulling from Discover idea — almost ready.',
     status: 'working',
     area: 'content',

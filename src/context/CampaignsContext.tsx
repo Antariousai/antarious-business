@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -13,8 +14,14 @@ import {
   type Campaign,
   type Platform,
 } from '../data/mockData'
+import { apiFetch } from '@/lib/backend/api'
+import {
+  mapApiCampaign,
+  mapCampaignStatusToApi,
+} from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
 
-const STORAGE_KEY = 'antarious-campaigns-v1'
+const STORAGE_KEY = 'antarious-campaigns-v2-bd'
 
 function loadCampaigns(): Campaign[] {
   try {
@@ -74,20 +81,57 @@ interface CampaignsContextValue {
   pause: (id: string) => void
   resume: (id: string) => void
   launch: (id: string) => void
-  createCampaign: (input: NewCampaignInput) => Campaign
-  updateCampaign: (id: string, input: NewCampaignInput, options?: { republish?: boolean }) => Campaign | undefined
+  createCampaign: (input: NewCampaignInput) => Campaign | Promise<Campaign>
+  updateCampaign: (
+    id: string,
+    input: NewCampaignInput,
+    options?: { republish?: boolean },
+  ) => Campaign | undefined | Promise<Campaign | undefined>
   resetCampaigns: () => void
+  refresh: () => Promise<void>
 }
 
 const CampaignsContext = createContext<CampaignsContextValue | null>(null)
 
-export function CampaignsProvider({ children }: { children: ReactNode }) {
-  const [campaigns, setCampaigns] = useState<Campaign[]>(loadCampaigns)
+function budgetToNumber(budget: string): number {
+  const n = Number(parseCampaignBudget(budget))
+  return Number.isFinite(n) ? n : 0
+}
 
-  const persist = useCallback((next: Campaign[]) => {
-    setCampaigns(next)
-    saveCampaigns(next)
-  }, [])
+export function CampaignsProvider({ children }: { children: ReactNode }) {
+  const { backend, ready } = useBackendMode()
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const data = await apiFetch<{ campaigns: Parameters<typeof mapApiCampaign>[0][] }>(
+      '/api/campaigns',
+    )
+    setCampaigns((data.campaigns ?? []).map((row, i) => mapApiCampaign(row, i)))
+  }, [backend])
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      setCampaigns(loadCampaigns())
+      return
+    }
+    let cancelled = false
+    void refresh().catch(() => {
+      if (!cancelled) setCampaigns([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
+
+  const persist = useCallback(
+    (next: Campaign[]) => {
+      setCampaigns(next)
+      if (!backend) saveCampaigns(next)
+    },
+    [backend],
+  )
 
   const getCampaign = useCallback(
     (id: string) => campaigns.find((c) => c.id === id),
@@ -96,6 +140,27 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
 
   const setStatus = useCallback(
     (id: string, status: Campaign['status']) => {
+      if (backend) {
+        void apiFetch('/api/campaigns', {
+          method: 'PATCH',
+          body: JSON.stringify({ id, status: mapCampaignStatusToApi(status) }),
+        }).then(() => refresh())
+        setCampaigns((prev) =>
+          prev.map((c) => {
+            if (c.id !== id) return c
+            const summary =
+              status === 'running'
+                ? `Live now — Freya is running ${c.title}. Check back for results.`
+                : status === 'paused'
+                  ? `Paused — resume anytime to keep ${c.title} going.`
+                  : status === 'draft'
+                    ? `Draft ready — Freya built the plan. Launch when you approve.`
+                    : c.summary
+            return { ...c, status, summary }
+          }),
+        )
+        return
+      }
       persist(
         campaigns.map((c) => {
           if (c.id !== id) return c
@@ -111,7 +176,7 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [campaigns, persist],
+    [backend, campaigns, persist, refresh],
   )
 
   const pause = useCallback((id: string) => setStatus(id, 'paused'), [setStatus])
@@ -119,10 +184,33 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
   const launch = useCallback((id: string) => setStatus(id, 'running'), [setStatus])
 
   const createCampaign = useCallback(
-    (input: NewCampaignInput) => {
-      const id = `c${Date.now()}`
+    async (input: NewCampaignInput): Promise<Campaign> => {
       const platforms = input.platforms.length ? input.platforms : (['Instagram'] as Platform[])
       const budgetLabel = input.budget.startsWith('$') ? input.budget : `$${input.budget || '100'}`
+
+      if (backend) {
+        const data = await apiFetch<{ campaign: Parameters<typeof mapApiCampaign>[0] }>(
+          '/api/campaigns',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              title: input.title.trim() || 'Untitled campaign',
+              goal: input.goal.trim() || null,
+              audience: input.audience.trim() || null,
+              platforms,
+              budgetBdt: budgetToNumber(input.budget),
+              objective: input.objective || null,
+              tone: input.tone || null,
+              status: 'draft',
+            }),
+          },
+        )
+        const campaign = mapApiCampaign(data.campaign, campaigns.length)
+        setCampaigns((prev) => [campaign, ...prev])
+        return campaign
+      }
+
+      const id = `c${Date.now()}`
       const campaign: Campaign = {
         id,
         title: input.title.trim() || 'Untitled campaign',
@@ -169,16 +257,43 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
       persist([campaign, ...campaigns])
       return campaign
     },
-    [campaigns, persist],
+    [backend, campaigns, persist],
   )
 
   const updateCampaign = useCallback(
-    (id: string, input: NewCampaignInput, options?: { republish?: boolean }): Campaign | undefined => {
+    async (
+      id: string,
+      input: NewCampaignInput,
+      options?: { republish?: boolean },
+    ): Promise<Campaign | undefined> => {
       const platforms = input.platforms.length ? input.platforms : (['Instagram'] as Platform[])
       const budgetLabel = input.budget.startsWith('$') ? input.budget : `$${input.budget || '100'}`
       const republish = options?.republish ?? false
-      let updated: Campaign | undefined
 
+      if (backend) {
+        const data = await apiFetch<{ campaign: Parameters<typeof mapApiCampaign>[0] }>(
+          '/api/campaigns',
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              id,
+              title: input.title.trim() || undefined,
+              goal: input.goal.trim() || null,
+              audience: input.audience.trim() || null,
+              platforms,
+              budgetBdt: budgetToNumber(input.budget),
+              objective: input.objective || null,
+              tone: input.tone || null,
+              ...(republish ? { status: mapCampaignStatusToApi('running') } : {}),
+            }),
+          },
+        )
+        const mapped = mapApiCampaign(data.campaign)
+        setCampaigns((prev) => prev.map((c) => (c.id === id ? mapped : c)))
+        return mapped
+      }
+
+      let updated: Campaign | undefined
       const next = campaigns.map((c) => {
         if (c.id !== id) return c
         const title = input.title.trim() || c.title
@@ -216,13 +331,17 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
       persist(next)
       return updated
     },
-    [campaigns, persist],
+    [backend, campaigns, persist],
   )
 
   const resetCampaigns = useCallback(() => {
+    if (backend) {
+      void refresh()
+      return
+    }
     const seed = structuredClone(SEED)
     persist(seed)
-  }, [persist])
+  }, [backend, persist, refresh])
 
   const value = useMemo(
     () => ({
@@ -235,8 +354,20 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
       createCampaign,
       updateCampaign,
       resetCampaigns,
+      refresh,
     }),
-    [campaigns, getCampaign, setStatus, pause, resume, launch, createCampaign, updateCampaign, resetCampaigns],
+    [
+      campaigns,
+      getCampaign,
+      setStatus,
+      pause,
+      resume,
+      launch,
+      createCampaign,
+      updateCampaign,
+      resetCampaigns,
+      refresh,
+    ],
   )
 
   return <CampaignsContext.Provider value={value}>{children}</CampaignsContext.Provider>

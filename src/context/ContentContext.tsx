@@ -2,13 +2,18 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
 import { CONTENT_POSTS as SEED, type ContentPost, type Platform } from '../data/mockData'
+import { apiFetch } from '@/lib/backend/api'
+import { mapApiPost } from '@/lib/backend/mappers'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { hasSupabaseEnv } from '@/lib/backend/mode'
 
-const STORAGE_KEY = 'antarious-content-posts-v1'
+const STORAGE_KEY = 'antarious-content-posts-v2-bd'
 
 function normalizePost(post: ContentPost): ContentPost {
   return {
@@ -41,17 +46,21 @@ export type SavePostInput = {
   status: ContentPost['status']
   scheduledAt?: string
   author?: string
+  /** Uploaded storage assets (backend mode) */
+  assets?: { path: string; mimeType?: string; url?: string }[]
 }
 
 interface ContentContextValue {
   posts: ContentPost[]
-  createPost: (input: SavePostInput) => ContentPost
+  loading: boolean
+  createPost: (input: SavePostInput) => ContentPost | Promise<ContentPost>
   updatePost: (
     id: string,
     input: Partial<SavePostInput>,
     options?: { republish?: boolean },
-  ) => ContentPost | undefined
+  ) => ContentPost | undefined | Promise<ContentPost | undefined>
   resetPosts: () => void
+  refresh: () => Promise<void>
 }
 
 const ContentContext = createContext<ContentContextValue | null>(null)
@@ -78,15 +87,76 @@ function formatPostDate(status: ContentPost['status'], scheduledAt?: string): st
 }
 
 export function ContentProvider({ children }: { children: ReactNode }) {
-  const [posts, setPosts] = useState<ContentPost[]>(loadPosts)
+  const { backend, ready } = useBackendMode()
+  const [posts, setPosts] = useState<ContentPost[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const persist = useCallback((next: ContentPost[]) => {
+  const refresh = useCallback(async () => {
+    if (!backend) return
+    const data = await apiFetch<{ posts: Parameters<typeof mapApiPost>[0][] }>('/api/posts')
+    setPosts((data.posts ?? []).map(mapApiPost))
+  }, [backend])
+
+  useEffect(() => {
+    if (!ready) return
+    if (!backend) {
+      // Supabase configured but no session — don't revive demo seed posts.
+      if (hasSupabaseEnv()) {
+        setPosts([])
+        setLoading(false)
+        return
+      }
+      setPosts(loadPosts())
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    void refresh()
+      .catch(() => {
+        if (!cancelled) setPosts([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [backend, ready, refresh])
+
+  const persistLocal = useCallback((next: ContentPost[]) => {
     setPosts(next)
     savePosts(next)
   }, [])
 
   const createPost = useCallback(
-    (input: SavePostInput): ContentPost => {
+    async (input: SavePostInput): Promise<ContentPost> => {
+      if (backend) {
+        const data = await apiFetch<{ post: Parameters<typeof mapApiPost>[0] }>('/api/posts', {
+          method: 'POST',
+          body: JSON.stringify({
+            caption: input.caption,
+            tag: input.tag,
+            status: input.status,
+            scheduled_at: input.scheduledAt ?? null,
+            platforms: input.platforms,
+            assets: (input.assets ?? [])
+              .filter((a) => a.path)
+              .map((a) => ({ path: a.path, mimeType: a.mimeType })),
+          }),
+        })
+        const mapped = mapApiPost({
+          ...data.post,
+          content_post_platforms: input.platforms.map((platform) => ({ platform })),
+          image_url: data.post.image_url || input.assets?.[0]?.url || input.image || '',
+        })
+        if (!mapped.image && (input.assets?.[0]?.url || input.image)) {
+          mapped.image = input.assets?.[0]?.url || input.image
+        }
+        setPosts((prev) => [mapped, ...prev])
+        return mapped
+      }
+
       const post: ContentPost = {
         id: `p-${Date.now()}`,
         platform: input.platforms[0] ?? 'Instagram',
@@ -103,14 +173,51 @@ export function ContentProvider({ children }: { children: ReactNode }) {
         comments: 0,
         shares: 0,
       }
-      persist([post, ...posts])
+      persistLocal([post, ...posts])
       return post
     },
-    [persist, posts],
+    [backend, persistLocal, posts],
   )
 
   const updatePost = useCallback(
-    (id: string, input: Partial<SavePostInput>, options?: { republish?: boolean }): ContentPost | undefined => {
+    async (
+      id: string,
+      input: Partial<SavePostInput>,
+      options?: { republish?: boolean },
+    ): Promise<ContentPost | undefined> => {
+      if (backend) {
+        const data = await apiFetch<{ post: Parameters<typeof mapApiPost>[0] }>('/api/posts', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            id,
+            caption: input.caption,
+            tag: input.tag,
+            status: input.status,
+            scheduled_at: input.scheduledAt,
+            platforms: input.platforms,
+            ...(input.assets
+              ? {
+                  assets: input.assets
+                    .filter((a) => a.path)
+                    .map((a) => ({ path: a.path, mimeType: a.mimeType })),
+                }
+              : {}),
+          }),
+        })
+        const mapped = mapApiPost({
+          ...data.post,
+          content_post_platforms:
+            input.platforms?.map((platform) => ({ platform })) ??
+            data.post.content_post_platforms,
+          image_url: data.post.image_url || input.assets?.[0]?.url || input.image || data.post.image_url,
+        })
+        if (!mapped.image && (input.assets?.[0]?.url || input.image)) {
+          mapped.image = input.assets?.[0]?.url || input.image || ''
+        }
+        setPosts((prev) => prev.map((p) => (p.id === id ? mapped : p)))
+        return mapped
+      }
+
       let updated: ContentPost | undefined
       const next = posts.map((p) => {
         if (p.id !== id) return p
@@ -127,19 +234,23 @@ export function ContentProvider({ children }: { children: ReactNode }) {
         return updated
       })
       if (!updated) return undefined
-      persist(next)
+      persistLocal(next)
       return updated
     },
-    [persist, posts],
+    [backend, persistLocal, posts],
   )
 
   const resetPosts = useCallback(() => {
-    persist(SEED.map(normalizePost))
-  }, [persist])
+    if (backend) {
+      void refresh()
+      return
+    }
+    persistLocal(SEED.map(normalizePost))
+  }, [backend, persistLocal, refresh])
 
   const value = useMemo(
-    () => ({ posts, createPost, updatePost, resetPosts }),
-    [posts, createPost, updatePost, resetPosts],
+    () => ({ posts, loading, createPost, updatePost, resetPosts, refresh }),
+    [posts, loading, createPost, updatePost, resetPosts, refresh],
   )
 
   return <ContentContext.Provider value={value}>{children}</ContentContext.Provider>

@@ -1,14 +1,24 @@
 import { useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
+import { useApp } from '../context/AppContext'
 import { useLeads } from '../context/LeadsContext'
-import { freyaFillLead } from '../lib/freyaCreationHelpers'
+import { freyaFillLead, type FreyaBizContext } from '../lib/freyaCreationHelpers'
 import type { Lead, LeadPlatform, LeadSource, LeadTemp } from '../data/leadsData'
 
-const QUICK_TAGS = ['Catering', 'Events', 'Corporate', 'Wedding', 'Custom Order', 'Wholesale', 'Local', 'Repeat']
+const QUICK_TAGS = ['Bridal', 'Events', 'Corporate', 'Photoshoot', 'Custom Order', 'Wholesale', 'Local', 'Repeat']
 
 export function AddLeadModal({ onClose }: { onClose: () => void }) {
   const { addLead } = useLeads()
+  const { profile, prefs } = useApp()
+  const bizCtx: FreyaBizContext = {
+    businessName: profile?.businessName,
+    industry: profile?.industry,
+    customers: profile?.customers,
+    goals: profile?.goals,
+    platforms: profile?.platforms,
+    tone: prefs.tone,
+  }
   const [prompt, setPrompt] = useState('')
   const [leaveToFreya, setLeaveToFreya] = useState(false)
   const [name, setName] = useState('')
@@ -27,7 +37,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
-      const filled = freyaFillLead(prompt)
+      const filled = freyaFillLead(prompt, bizCtx)
       setName(filled.name)
       setCompany(filled.company)
       setNote(filled.note)
@@ -40,7 +50,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
     e.preventDefault()
     setBuilding(true)
 
-    const filled = leaveToFreya ? freyaFillLead(prompt) : { name, email, company, note, tags }
+    const filled = leaveToFreya ? freyaFillLead(prompt, bizCtx) : { name, email, company, note, tags }
     const leadName = filled.name.trim()
     if (!leadName) {
       setBuilding(false)
@@ -91,7 +101,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
             applying={applying}
             disabled={busy}
             applyLabel="Freya, fill this from my prompt"
-            placeholder="e.g. Wedding inquiry from Instagram — wants a custom cake for September"
+            placeholder="e.g. Bridal inquiry from Instagram — wants a custom lehenga for September"
           />
 
           {leaveToFreya ? (
@@ -373,7 +383,7 @@ export function EditLeadModal({ lead, onClose }: { lead: Lead; onClose: () => vo
             <button
               type="submit"
               disabled={!name.trim()}
-              className="h-11 flex-1 rounded-full bg-gradient-to-r from-sky-bright to-violet-500 px-5 text-[14px] font-bold text-white shadow-sm shadow-sky/30 hover:brightness-110 disabled:opacity-50 sm:flex-none sm:min-w-[140px]"
+              className="h-11 flex-1 rounded-full bg-gradient-to-r from-sky-bright to-sky-bright px-5 text-[14px] font-bold text-white shadow-sm shadow-sky/30 hover:brightness-110 disabled:opacity-50 sm:flex-none sm:min-w-[140px]"
             >
               Save changes
             </button>
