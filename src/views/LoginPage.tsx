@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowUp } from 'lucide-react'
 import { FreyaLoginFigure } from '../components/FreyaLoginFigure'
 import { LoginStageBackground } from '../components/LoginStageBackground'
@@ -12,6 +12,7 @@ import { saveLoginHandoff } from '../lib/loginHandoff'
 
 type ChatMsg = { id: string; role: 'freya' | 'you'; text: string }
 type Step = 'name' | 'auth'
+type AuthPanel = 'account' | 'forgot'
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -30,13 +31,18 @@ function hasSupabaseEnv() {
 export function LoginPage() {
   const { login, hydrateFromBackend } = useApp()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [step, setStep] = useState<Step>('name')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState<'signup' | 'login'>('signup')
+  const [authPanel, setAuthPanel] = useState<AuthPanel>('account')
   const [error, setError] = useState<string | null>(null)
   const [checkEmail, setCheckEmail] = useState<string | null>(null)
+  const [resetSent, setResetSent] = useState<string | null>(null)
+  const [verified, setVerified] = useState(false)
+  const [passwordReset, setPasswordReset] = useState(false)
   const [messages, setMessages] = useState<ChatMsg[]>(() =>
     FREYA_PERSONA.login.opener.map((text, i) => ({ id: `f${i}`, role: 'freya', text })),
   )
@@ -47,9 +53,16 @@ export function LoginPage() {
   const handoffRef = useRef<ChatMsg[]>(messages)
   const threadRef = useRef<HTMLDivElement>(null)
   const ownerNameRef = useRef('')
+  const bootstrapped = useRef(false)
 
   const freyaEngaged =
-    inputFocused || name.trim().length > 0 || email.trim().length > 0 || sending || typing
+    inputFocused ||
+    name.trim().length > 0 ||
+    email.trim().length > 0 ||
+    sending ||
+    typing ||
+    verified ||
+    passwordReset
 
   useEffect(() => {
     handoffRef.current = messages
@@ -57,7 +70,88 @@ export function LoginPage() {
 
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages, typing])
+  }, [messages, typing, step, verified, checkEmail, resetSent, authPanel])
+
+  // Deep-link from email confirmation / password reset / auth errors
+  useEffect(() => {
+    if (bootstrapped.current) return
+    bootstrapped.current = true
+
+    const isVerified = searchParams.get('verified') === '1'
+    const isReset = searchParams.get('reset') === '1'
+    const modeParam = searchParams.get('mode')
+    const emailParam = searchParams.get('email')?.trim() || ''
+    const errParam = searchParams.get('error')
+
+    if (emailParam) setEmail(emailParam)
+
+    if (isReset) {
+      setPasswordReset(true)
+      setVerified(false)
+      setStep('auth')
+      setMode('login')
+      setAuthPanel('account')
+      const msgs: ChatMsg[] = [
+        {
+          id: uid(),
+          role: 'freya',
+          text: 'Password updated — nice work.',
+        },
+        {
+          id: uid(),
+          role: 'freya',
+          text: emailParam
+            ? `Log in with ${emailParam} and your new password.`
+            : 'Log in with your new password and I’ll open your workspace.',
+        },
+      ]
+      setMessages(msgs)
+      handoffRef.current = msgs
+    } else if (isVerified) {
+      setVerified(true)
+      setStep('auth')
+      setMode('login')
+      setAuthPanel('account')
+      setCheckEmail(null)
+      const celebrate: ChatMsg[] = [
+        {
+          id: uid(),
+          role: 'freya',
+          text: 'You’re verified — welcome to Antarious.',
+        },
+        {
+          id: uid(),
+          role: 'freya',
+          text: emailParam
+            ? `Your email ${emailParam} is confirmed. Log in below and I’ll open your workspace.`
+            : 'Your email is confirmed. Log in below and I’ll open your workspace.',
+        },
+      ]
+      setMessages(celebrate)
+      handoffRef.current = celebrate
+    } else if (modeParam === 'forgot') {
+      setStep('auth')
+      setMode('login')
+      setAuthPanel('forgot')
+    } else if (modeParam === 'login') {
+      setStep('auth')
+      setMode('login')
+      setAuthPanel('account')
+    } else if (errParam) {
+      setStep('auth')
+      setMode('login')
+      setAuthPanel('account')
+      setError(
+        errParam === 'auth_callback' || errParam === 'auth_confirm'
+          ? 'That confirmation link expired or already used. Log in if you already verified, or sign up again.'
+          : decodeURIComponent(errParam),
+      )
+    }
+
+    if (isVerified || isReset || errParam || emailParam || modeParam) {
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   async function finishToOnboarding(displayName: string, fromBackend = false) {
     setExiting(true)
@@ -116,6 +210,10 @@ export function LoginPage() {
 
   async function onAuthSubmit(e: FormEvent) {
     e.preventDefault()
+    if (authPanel === 'forgot') {
+      await onForgotSubmit()
+      return
+    }
     if (!email.trim() || password.length < 6 || sending || exiting) return
     setSending(true)
     setError(null)
@@ -133,7 +231,7 @@ export function LoginPage() {
           password,
           options: {
             data: { full_name: displayName },
-            emailRedirectTo: `${appUrl}/auth/callback`,
+            emailRedirectTo: `${appUrl}/auth/callback?intent=confirm`,
           },
         })
         if (signError) throw signError
@@ -141,6 +239,7 @@ export function LoginPage() {
         // Confirm-email enabled → no session until they click the link.
         if (!data.session) {
           setCheckEmail(email.trim())
+          setVerified(false)
           setSending(false)
           const youMsg: ChatMsg = {
             id: uid(),
@@ -183,6 +282,42 @@ export function LoginPage() {
     }
   }
 
+  async function onForgotSubmit() {
+    if (!email.trim() || sending || exiting) return
+    setSending(true)
+    setError(null)
+    try {
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || window.location.origin
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${appUrl}/auth/reset-password`,
+      })
+      if (resetError) throw resetError
+
+      setResetSent(email.trim())
+      setSending(false)
+      const youMsg: ChatMsg = {
+        id: uid(),
+        role: 'you',
+        text: `Reset password for ${email.trim()}`,
+      }
+      const freyaMsg: ChatMsg = {
+        id: uid(),
+        role: 'freya',
+        text: `I sent a reset link to ${email.trim()}. Open it, choose a new password, then log in.`,
+      }
+      setMessages((prev) => {
+        handoffRef.current = [...prev, youMsg, freyaMsg]
+        return handoffRef.current
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send reset email')
+      setSending(false)
+    }
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -191,9 +326,11 @@ export function LoginPage() {
     }
   }
 
+  const showAuthCompact = step === 'auth'
+
   return (
     <div
-      className={`login-stage relative flex min-h-screen flex-col overflow-hidden${exiting ? ' login-stage-exit' : ''}`}
+      className={`login-stage relative flex min-h-screen flex-col${exiting ? ' login-stage-exit' : ''}${showAuthCompact ? ' login-stage--auth' : ''}`}
     >
       <LoginStageBackground />
 
@@ -204,19 +341,48 @@ export function LoginPage() {
 
         <section className="login-meet" aria-label="Chat with Freya">
           <div className="login-pair">
-            <div className="login-freya-presence" aria-label="Freya">
+            <div
+              className={`login-freya-presence${showAuthCompact ? ' login-freya-presence--compact' : ''}`}
+              aria-label="Freya"
+            >
               <FreyaLoginFigure engaged={freyaEngaged} />
             </div>
 
             <div className="login-chat-col">
               <div className="login-meet-intro">
                 <h1 className="login-headline">
-                  Meet <span className="login-accent">Freya</span>
+                  {passwordReset ? (
+                    <>
+                      Password <span className="login-accent">updated</span>
+                    </>
+                  ) : verified ? (
+                    <>
+                      You’re <span className="login-accent">verified</span>
+                    </>
+                  ) : authPanel === 'forgot' ? (
+                    <>
+                      Reset <span className="login-accent">password</span>
+                    </>
+                  ) : (
+                    <>
+                      Meet <span className="login-accent">Freya</span>
+                    </>
+                  )}
                 </h1>
-                <p className="login-support">{FREYA_PERSONA.login.status}</p>
+                <p className="login-support">
+                  {passwordReset
+                    ? 'Your new password is ready — log in to continue.'
+                    : verified
+                      ? 'Email confirmed — log in to continue with Freya.'
+                      : authPanel === 'forgot'
+                        ? 'We’ll email you a secure link to choose a new password.'
+                        : FREYA_PERSONA.login.status}
+                </p>
               </div>
 
-              <div className={`login-chat${step === 'auth' ? ' login-chat--auth' : ''}`}>
+              <div
+                className={`login-chat${step === 'auth' ? ' login-chat--auth' : ''}${verified || passwordReset ? ' login-chat--verified' : ''}`}
+              >
                 <div className="login-chat-tail" aria-hidden />
                 <div ref={threadRef} className="login-chat-thread">
                   {messages.map((m, i) =>
@@ -264,6 +430,8 @@ export function LoginPage() {
                           onBlur={() => setInputFocused(false)}
                           placeholder={FREYA_PERSONA.login.placeholder}
                           autoFocus
+                          autoComplete="name"
+                          enterKeyHint="go"
                           disabled={sending}
                           className="login-chat-input"
                         />
@@ -282,8 +450,86 @@ export function LoginPage() {
                   <form onSubmit={onAuthSubmit} className="login-chat-auth">
                     {exiting ? (
                       <p className="login-chat-handoff">Opening your workspace…</p>
+                    ) : authPanel === 'forgot' ? (
+                      <>
+                        {resetSent ? (
+                          <div className="login-chat-auth-notice">
+                            <p className="login-chat-auth-notice-title">Check your email</p>
+                            <p>
+                              We sent a reset link to <strong>{resetSent}</strong>. Open it to
+                              choose a new password, then log in.
+                            </p>
+                            <button
+                              type="button"
+                              className="login-chat-auth-notice-link"
+                              onClick={() => {
+                                setAuthPanel('account')
+                                setMode('login')
+                                setResetSent(null)
+                              }}
+                            >
+                              Back to log in →
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <label className="login-chat-auth-field">
+                              <span>Email</span>
+                              <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                onFocus={() => setInputFocused(true)}
+                                onBlur={() => setInputFocused(false)}
+                                placeholder="you@business.com"
+                                autoComplete="email"
+                                inputMode="email"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                autoFocus
+                                disabled={sending}
+                                className="login-chat-auth-input"
+                              />
+                            </label>
+                            <button
+                              type="submit"
+                              disabled={!email.trim() || sending}
+                              className="login-chat-auth-submit"
+                            >
+                              {sending ? 'Sending link…' : 'Send reset link'}
+                            </button>
+                          </>
+                        )}
+                        {error ? <p className="login-chat-auth-error">{error}</p> : null}
+                        <button
+                          type="button"
+                          className="login-chat-auth-back"
+                          onClick={() => {
+                            setAuthPanel('account')
+                            setMode('login')
+                            setResetSent(null)
+                            setError(null)
+                          }}
+                        >
+                          ← Back to log in
+                        </button>
+                      </>
                     ) : (
                       <>
+                        {verified ? (
+                          <div className="login-chat-auth-notice login-chat-auth-notice--success">
+                            <p className="login-chat-auth-notice-title">Email verified</p>
+                            <p>You’re all set. Enter your password to log in and meet Freya.</p>
+                          </div>
+                        ) : null}
+
+                        {passwordReset ? (
+                          <div className="login-chat-auth-notice login-chat-auth-notice--success">
+                            <p className="login-chat-auth-notice-title">Password updated</p>
+                            <p>Log in with your new password to continue.</p>
+                          </div>
+                        ) : null}
+
                         <div className="login-chat-auth-modes" role="tablist" aria-label="Account mode">
                           <button
                             type="button"
@@ -293,6 +539,8 @@ export function LoginPage() {
                             onClick={() => {
                               setMode('signup')
                               setCheckEmail(null)
+                              setVerified(false)
+                              setPasswordReset(false)
                               setError(null)
                             }}
                           >
@@ -317,8 +565,8 @@ export function LoginPage() {
                           <div className="login-chat-auth-notice">
                             <p className="login-chat-auth-notice-title">Check your email</p>
                             <p>
-                              We sent a confirmation link to <strong>{checkEmail}</strong>. Click it
-                              to verify, then use Log in.
+                              We sent a confirmation link to <strong>{checkEmail}</strong>. Open it
+                              to verify, then you’ll come back here to log in.
                             </p>
                             <button
                               type="button"
@@ -343,7 +591,10 @@ export function LoginPage() {
                                 onBlur={() => setInputFocused(false)}
                                 placeholder="you@business.com"
                                 autoComplete="email"
-                                autoFocus
+                                inputMode="email"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                autoFocus={!verified && !passwordReset}
                                 disabled={sending}
                                 className="login-chat-auth-input"
                               />
@@ -355,12 +606,29 @@ export function LoginPage() {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 onKeyDown={onKeyDown}
+                                onFocus={() => setInputFocused(true)}
+                                onBlur={() => setInputFocused(false)}
                                 placeholder="At least 6 characters"
                                 autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                                autoFocus={verified || passwordReset}
+                                enterKeyHint="go"
                                 disabled={sending}
                                 className="login-chat-auth-input"
                               />
                             </label>
+                            {mode === 'login' ? (
+                              <button
+                                type="button"
+                                className="login-chat-auth-forgot"
+                                onClick={() => {
+                                  setAuthPanel('forgot')
+                                  setError(null)
+                                  setPassword('')
+                                }}
+                              >
+                                Forgot password?
+                              </button>
+                            ) : null}
                             <button
                               type="submit"
                               disabled={!email.trim() || password.length < 6 || sending}
@@ -372,12 +640,27 @@ export function LoginPage() {
                                   : 'Signing in…'
                                 : mode === 'signup'
                                   ? 'Create account'
-                                  : 'Log in'}
+                                  : verified || passwordReset
+                                    ? 'Log in to continue'
+                                    : 'Log in'}
                             </button>
                           </>
                         )}
 
                         {error ? <p className="login-chat-auth-error">{error}</p> : null}
+
+                        {step === 'auth' && !verified && !passwordReset && !checkEmail ? (
+                          <button
+                            type="button"
+                            className="login-chat-auth-back"
+                            onClick={() => {
+                              setStep('name')
+                              setError(null)
+                            }}
+                          >
+                            ← Back
+                          </button>
+                        ) : null}
                       </>
                     )}
                   </form>

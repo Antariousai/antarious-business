@@ -351,6 +351,9 @@ a,
   max-width: 68rem;
   margin: 0 auto;
   padding: clamp(1.35rem, 3.2vh, 2.25rem) clamp(1.5rem, 3.5vw, 2.5rem) clamp(1.25rem, 3vh, 2rem);
+  padding-left: max(clamp(1rem, 3.5vw, 2.5rem), env(safe-area-inset-left));
+  padding-right: max(clamp(1rem, 3.5vw, 2.5rem), env(safe-area-inset-right));
+  padding-bottom: max(clamp(1rem, 3vh, 2rem), env(safe-area-inset-bottom));
 }
 
 .login-brand-bar {
@@ -1428,6 +1431,47 @@ a,
   text-decoration: underline;
 }
 
+.login-chat-auth-notice--success {
+  border-color: rgba(16, 185, 129, 0.28);
+  background: rgba(236, 253, 245, 0.9);
+}
+
+.login-chat-auth-notice--success .login-chat-auth-notice-title {
+  color: #059669;
+}
+
+.login-chat-auth-back {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.login-chat-auth-back:hover {
+  color: #0ea5e9;
+}
+
+.login-chat-auth-forgot {
+  align-self: flex-end;
+  margin: -0.15rem 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #0284c7;
+  cursor: pointer;
+}
+
+.login-chat-auth-forgot:hover {
+  text-decoration: underline;
+}
+
 .login-chat-fine {
   display: none;
 }
@@ -1908,20 +1952,119 @@ a,
 }
 
 @media (max-width: 640px) {
-  .login-headline {
-    font-size: 1.75rem;
+  .login-stage {
+    height: auto;
+    max-height: none;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .login-chat {
-    --login-chat-h: 18rem;
+  .login-stage--auth {
+    height: auto;
+    max-height: none;
+  }
+
+  .login-welcome {
+    padding-top: max(0.85rem, env(safe-area-inset-top));
+    padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+  }
+
+  .login-brand-bar {
+    padding: 0.35rem 0 0.65rem 0.15rem;
+  }
+
+  .login-brand-logo {
+    max-width: min(9.5rem, 52vw);
+  }
+
+  .login-meet {
+    justify-content: flex-start;
+    gap: 0.65rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .login-pair {
+    gap: 0.65rem;
+    max-width: 100%;
+  }
+
+  .login-headline {
+    font-size: clamp(1.45rem, 7vw, 1.75rem);
+    line-height: 1.15;
+  }
+
+  .login-support {
+    font-size: 0.875rem;
+    line-height: 1.4;
+  }
+
+  .login-freya-presence {
+    max-width: 11rem;
+  }
+
+  .login-freya-presence--compact {
+    max-width: 7.5rem;
   }
 
   .login-freya-live {
-    width: min(15rem, 70vw);
-    height: min(18rem, 38vh);
+    width: min(11rem, 42vw);
+    height: min(13rem, 28vh);
+  }
+
+  .login-freya-presence--compact .login-freya-live {
+    width: min(7.5rem, 34vw);
+    height: min(9rem, 20vh);
+  }
+
+  .login-chat {
+    --login-chat-h: min(16rem, 42dvh);
+    border-radius: 1rem;
+  }
+
+  .login-chat--auth {
+    min-height: 0;
+  }
+
+  .login-chat--auth .login-chat-thread,
+  .login-chat--verified .login-chat-thread {
+    max-height: 6.5rem;
+    padding: 0.7rem 0.8rem;
+  }
+
+  .login-chat-bubble {
+    max-width: 92%;
+    font-size: 0.875rem;
+  }
+
+  .login-chat-composer {
+    padding: 0.55rem 0.65rem;
+  }
+
+  .login-chat-input,
+  .login-chat-send {
+    height: 2.75rem;
+  }
+
+  .login-chat-auth {
+    gap: 0.55rem;
+    padding: 0.7rem 0.75rem 0.85rem;
+  }
+
+  .login-chat-auth-input,
+  .login-chat-auth-submit {
+    height: 2.85rem;
+    font-size: 1rem; /* avoid iOS zoom on focus */
+    border-radius: 0.7rem;
+  }
+
+  .login-chat-auth-mode {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.8125rem;
   }
 
   .login-float {
-    opacity: 0.55;
+    opacity: 0.4;
   }
 }

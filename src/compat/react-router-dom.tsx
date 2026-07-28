@@ -9,7 +9,8 @@ import {
   usePathname,
   useRouter,
   useParams as useNextParams,
-  useSearchParams,
+  useSearchParams as useNextSearchParams,
+  type ReadonlyURLSearchParams,
 } from 'next/navigation'
 import {
   createContext,
@@ -56,7 +57,7 @@ export function useNavigate() {
 
 export function useLocation() {
   const pathname = usePathname() || '/'
-  const searchParams = useSearchParams()
+  const searchParams = useNextSearchParams()
   const search = searchParams?.toString() ? `?${searchParams.toString()}` : ''
   return useMemo(
     () => ({
@@ -72,6 +73,32 @@ export function useLocation() {
 
 export function useParams<T extends Record<string, string | string[]> = Record<string, string>>() {
   return useNextParams() as T
+}
+
+/** react-router-compatible: [URLSearchParams, setSearchParams] */
+export function useSearchParams(): [
+  ReadonlyURLSearchParams | URLSearchParams,
+  (next: URLSearchParams | Record<string, string>, opts?: { replace?: boolean }) => void,
+] {
+  const router = useRouter()
+  const pathname = usePathname() || '/'
+  const params = useNextSearchParams()
+
+  const setSearchParams = useCallback(
+    (next: URLSearchParams | Record<string, string>, opts?: { replace?: boolean }) => {
+      const sp =
+        next instanceof URLSearchParams
+          ? next
+          : new URLSearchParams(Object.entries(next).filter(([, v]) => v != null && v !== ''))
+      const q = sp.toString()
+      const href = q ? `${pathname}?${q}` : pathname
+      if (opts?.replace) router.replace(href)
+      else router.push(href)
+    },
+    [pathname, router],
+  )
+
+  return [params ?? new URLSearchParams(), setSearchParams]
 }
 
 type LinkProps = Omit<ComponentProps<'a'>, 'href'> & {

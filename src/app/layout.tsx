@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Providers } from '@/components/providers/Providers'
 import './globals.css'
 
@@ -13,6 +13,13 @@ export const metadata: Metadata = {
     shortcut: '/favicon.png',
     apple: '/favicon-32x32.png',
   },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#f4fbff',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
