@@ -2,7 +2,7 @@ import { ToolLoopAgent } from 'ai'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { freyaRouterTools } from './freyaRouter'
 import { freyaSystemPrompt, type FreyaBizSnapshot } from './persona'
-import { resolveModelId } from './model'
+import { resolveModel } from './model'
 
 export function createFreyaRouterAgent(
   supabase: SupabaseClient,
@@ -14,7 +14,7 @@ export function createFreyaRouterAgent(
 ) {
   return new ToolLoopAgent({
     id: 'freya-router',
-    model: resolveModelId(),
+    model: resolveModel(),
     instructions: freyaSystemPrompt(opts.snapshot),
     tools: freyaRouterTools(supabase, opts.organizationId, opts.userId),
   })

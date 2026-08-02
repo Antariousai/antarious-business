@@ -1,7 +1,7 @@
 export { contentWriterTools } from './contentWriter'
 export { freyaRouterTools } from './freyaRouter'
 export { freyaSystemPrompt, freyaWritingRules, type FreyaBizSnapshot } from './persona'
-export { resolveModelId, hasAiKey } from './model'
+export { resolveModelId, resolveModel, hasAiKey } from './model'
 export { createFreyaRouterAgent } from './createFreyaRouter'
 export {
   inboxReplierTools,

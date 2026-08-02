@@ -1,16 +1,34 @@
-/** Resolve model id for AI Gateway / OpenAI. */
-export function resolveModelId(modelId = 'openai/gpt-5.4-mini') {
-  // Direct OpenAI key without gateway: strip openai/ prefix for @ai-sdk/openai string models
-  // ToolLoopAgent accepts provider/model strings when AI Gateway is configured.
-  if (process.env.AI_GATEWAY_API_KEY || process.env.AI_GATEWAY_BASE_URL) {
-    return modelId.startsWith('openai/') ? modelId : `openai/${modelId}`
-  }
-  if (process.env.OPENAI_API_KEY) {
-    // With OPENAI_API_KEY alone, AI SDK still accepts openai/… via gateway-less provider registry
-    return modelId.startsWith('openai/') ? modelId : `openai/${modelId}`
-  }
-  // Placeholder — routes should short-circuit when hasAiKey() is false
+import { createOpenAI } from '@ai-sdk/openai'
+
+const DEFAULT_GATEWAY_ID = 'openai/gpt-5.4-mini'
+
+/** Canonical model id string for logging / usage events. */
+export function resolveModelId(modelId = DEFAULT_GATEWAY_ID) {
   return modelId.startsWith('openai/') ? modelId : `openai/${modelId}`
+}
+
+/**
+ * Language model for Freya agents.
+ *
+ * AI SDK string models like `openai/…` always go through **Vercel AI Gateway**.
+ * `OPENAI_API_KEY` alone does NOT authenticate the gateway — so when only that
+ * key is set, we use `@ai-sdk/openai` directly.
+ */
+export function resolveModel(modelId = DEFAULT_GATEWAY_ID) {
+  const gatewayId = resolveModelId(modelId)
+  const openAiId = gatewayId.replace(/^openai\//, '')
+
+  if (process.env.AI_GATEWAY_API_KEY || process.env.AI_GATEWAY_BASE_URL) {
+    return gatewayId
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    return openai(openAiId)
+  }
+
+  // Caller should short-circuit via hasAiKey(); string would fail gateway auth.
+  return gatewayId
 }
 
 export function hasAiKey() {
