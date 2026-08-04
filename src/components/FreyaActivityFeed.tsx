@@ -121,7 +121,7 @@ export function FreyaActivityFeed({ onNavigated }: { onNavigated?: () => void })
         </div>
       </div>
 
-      <div className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
+      <div className="flex-1 space-y-2.5 overflow-y-auto scrollbar-none px-3 py-3">
         {filtered.map((item) => (
           <ActivityCard
             key={item.id}

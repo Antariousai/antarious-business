@@ -371,9 +371,8 @@ type ApiLead = {
 }
 
 function asLeadStage(value: unknown): LeadStage {
-  const s = String(value ?? 'new')
-  if (s === 'contacted' || s === 'qualified' || s === 'converted') return s
-  return 'new'
+  const s = String(value ?? 'new').trim()
+  return s || 'new'
 }
 
 function asLeadTemp(value: unknown): LeadTemp {

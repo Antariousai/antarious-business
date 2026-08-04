@@ -20,6 +20,13 @@ export interface BusinessProfile {
   businessType?: import('./planTiers').BusinessTypeChip
   /** How Freya talks about who you serve */
   audienceServe?: 'customers' | 'clients' | 'both'
+  /** Home cover — signed URL (or local preview) */
+  coverUrl?: string
+  /** Home shop photo — signed URL (or local preview) */
+  logoUrl?: string
+  /** Supabase storage paths (backend) */
+  coverPath?: string
+  logoPath?: string
 }
 
 export interface ApprovalItem {

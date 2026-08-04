@@ -97,7 +97,8 @@ Run through this before pointing real users at the app.
 - Sanity check after deploy: sign in as two users in different orgs and confirm neither can read the other’s data.
 
 ### Team invites
-- Email delivery is **out of scope** (no Resend/SMTP). Invites are stored with a token; owners copy the accept link from **Team → Copy invite link** (`/api/team/invites/accept?token=…`). If you enable Supabase Auth email templates later, you can send this link automatically.
+- Invites are emailed via **Resend** (`RESEND_API_KEY`, optional `RESEND_FROM`, default `Freya <invites@freya.antarious.com>`). Accept link: `/api/team/invites/accept?token=…`.
+- Invitee must sign in with the **same email** the invite was sent to (work or personal). Owners can still **Copy invite link** if email delivery is unavailable.
 
 ## Key paths
 | Area | Path |
@@ -115,11 +116,11 @@ Run through this before pointing real users at the app.
 - Money: invoices, bills, expenses, accounts, parties, **bank transactions, ledger accounts, cashflow snapshots** all persist via `/api/money`. Match / reconcile / exclude and Freya auto-match are wired to the API.
 - CRM: full CRUD incl. **DELETE** for deals/contacts/companies; contact & company patches are **non-optimistic** (write → refresh).
 - Discover: signals, ideas, insights, **trends, competitor watches** persist; `POST /api/discover/refresh` regenerates them.
-- Team: invites stored; **accept flow** via `/api/team/invites/accept` (GET link + POST). Email send is out of scope.
+- Team: invites emailed via Resend; **accept flow** via `/api/team/invites/accept` (GET link + POST). Copy-link fallback if Resend is not configured.
 - Prod hardening: agent routes rate-limited; every agent run debits credits + logs `ai_usage_events`; RLS insert policies added for ledger/usage/audit.
 
 ### Still out of scope (intentional)
 - Live Meta / WhatsApp / bKash / Nagad send + payout APIs.
 - Stripe / bKash subscription billing (credit ledger simulates packs).
-- Transactional email (invite + reminder delivery) — links are copied manually.
+- Transactional email beyond team invites (invoice reminders, etc.).
 - Usage-metering dashboard UI, Bangla i18n, competitor web scraping, bank open-banking sync.

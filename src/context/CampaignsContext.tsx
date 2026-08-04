@@ -14,7 +14,7 @@ import {
   type Campaign,
   type Platform,
 } from '../data/mockData'
-import { apiFetch } from '@/lib/backend/api'
+import { apiFetch, ApiError } from '@/lib/backend/api'
 import {
   mapApiCampaign,
   mapCampaignStatusToApi,
@@ -104,10 +104,18 @@ export function CampaignsProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!backend) return
-    const data = await apiFetch<{ campaigns: Parameters<typeof mapApiCampaign>[0][] }>(
-      '/api/campaigns',
-    )
-    setCampaigns((data.campaigns ?? []).map((row, i) => mapApiCampaign(row, i)))
+    try {
+      const data = await apiFetch<{ campaigns: Parameters<typeof mapApiCampaign>[0][] }>(
+        '/api/campaigns',
+      )
+      setCampaigns((data.campaigns ?? []).map((row, i) => mapApiCampaign(row, i)))
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        setCampaigns([])
+        return
+      }
+      throw err
+    }
   }, [backend])
 
   useEffect(() => {

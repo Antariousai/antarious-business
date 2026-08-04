@@ -301,28 +301,30 @@ export function NotificationBell() {
                   approveAll()
                   markAllRead()
                 }}
-                className="rounded-full bg-sky px-3 py-1.5 text-[11px] font-bold text-white hover:bg-sky-bright"
+                className="rounded-full bg-sky px-3 py-1.5 text-[11px] font-bold text-white shadow-sm shadow-sky/25 hover:bg-sky-bright"
               >
                 Approve all waiting
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false)
-                openPanel('activity')
-              }}
-              className="ml-auto text-[11px] font-bold text-sky hover:text-sky-bright"
-            >
-              Freya Activity →
-            </button>
-            <Link
-              to="/app"
-              onClick={() => setOpen(false)}
-              className="text-[11px] font-semibold text-slate-500 hover:text-ink"
-            >
-              Home
-            </Link>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false)
+                  openPanel('activity')
+                }}
+                className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-bright to-sky px-3.5 py-1.5 text-[11px] font-bold text-white shadow-sm shadow-sky/30 hover:brightness-105"
+              >
+                Freya Activity →
+              </button>
+              <Link
+                to="/app"
+                onClick={() => setOpen(false)}
+                className="rounded-full px-3 py-1.5 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-200 hover:bg-white hover:text-ink"
+              >
+                Home
+              </Link>
+            </div>
           </div>
         </div>
       )}

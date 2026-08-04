@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, type ReactNode } from 'react'
 import { AppProvider } from '@/context/AppContext'
 import { CampaignsProvider } from '@/context/CampaignsContext'
+import { FunnelStagesProvider } from '@/context/FunnelStagesContext'
 import { LeadsProvider } from '@/context/LeadsContext'
 import { CrmProvider } from '@/context/CrmContext'
 import { InboxProvider } from '@/context/InboxContext'
@@ -18,27 +19,29 @@ function Tree({ children }: { children: ReactNode }) {
   return (
     <BackendModeProvider>
       <AppProvider>
-        <CampaignsProvider>
-          <LeadsProvider>
-            <CrmProvider>
-              <InboxProvider>
-                <MoneyProvider>
-                  <DiscoverProvider>
-                    <TemplatesProvider>
-                      <ContentProvider>
-                        <FreyaActivityProvider>
-                          <Suspense fallback={null}>
-                            <RouteFade>{children}</RouteFade>
-                          </Suspense>
-                        </FreyaActivityProvider>
-                      </ContentProvider>
-                    </TemplatesProvider>
-                  </DiscoverProvider>
-                </MoneyProvider>
-              </InboxProvider>
-            </CrmProvider>
-          </LeadsProvider>
-        </CampaignsProvider>
+        <FunnelStagesProvider>
+          <CampaignsProvider>
+            <LeadsProvider>
+              <CrmProvider>
+                <InboxProvider>
+                  <MoneyProvider>
+                    <DiscoverProvider>
+                      <TemplatesProvider>
+                        <ContentProvider>
+                          <FreyaActivityProvider>
+                            <Suspense fallback={null}>
+                              <RouteFade>{children}</RouteFade>
+                            </Suspense>
+                          </FreyaActivityProvider>
+                        </ContentProvider>
+                      </TemplatesProvider>
+                    </DiscoverProvider>
+                  </MoneyProvider>
+                </InboxProvider>
+              </CrmProvider>
+            </LeadsProvider>
+          </CampaignsProvider>
+        </FunnelStagesProvider>
       </AppProvider>
     </BackendModeProvider>
   )

@@ -6,46 +6,123 @@ import { FreyaActivityFeed } from './FreyaActivityFeed'
 import { useFreyaActivity } from '../context/FreyaActivityContext'
 import { useInbox } from '../context/InboxContext'
 import { useMoney } from '../context/MoneyContext'
+import { useContent } from '../context/ContentContext'
+import { useLeads } from '../context/LeadsContext'
+import { useCampaigns } from '../context/CampaignsContext'
+import { useCrm } from '../context/CrmContext'
 import { useApp } from '../context/AppContext'
 import { parseFreyaIntent } from '../lib/freyaIntents'
-import { audienceWord } from '../data/planTiers'
+import { audienceWord, canAccessModule, type AppModule } from '../data/planTiers'
 import { useBackendMode } from '@/lib/backend/BackendModeContext'
-import { approveFreyaActivities, streamFreyaChat } from '@/lib/backend/freyaChat'
+import {
+  approveFreyaActivities,
+  streamFreyaChat,
+  splitFreyaReply,
+  type FreyaOutputCard,
+  type FreyaRefreshModule,
+} from '@/lib/backend/freyaChat'
+import { rememberUser } from '@/lib/rememberedUser'
 
-type ChatMsg = { id: string; role: 'freya' | 'you'; text: string }
+type ChatMsg = {
+  id: string
+  role: 'freya' | 'you'
+  text: string
+  /** Live status while Freya is working (not persisted long-term). */
+  status?: string
+  working?: boolean
+  cards?: FreyaOutputCard[]
+  followUp?: string
+}
 
-const SUGGESTIONS_STARTER = [
-  'Approve what’s waiting',
-  'Draft a post',
-  'Check messages',
-  'Open Customers',
-]
-
-const SUGGESTIONS_GROWTH = [
-  'Approve what’s waiting',
-  'Draft a post',
-  'Plan a campaign',
-  'Show interested people',
-]
-
-const SUGGESTIONS_SCALE = [
-  'Approve what’s waiting',
-  'Draft a post',
-  'Show overdue invoices',
-  'Open Team',
+/** Module-focused chips — filtered by plan entitlements. */
+const SUGGESTION_CHIPS: { label: string; module: AppModule | null }[] = [
+  { label: 'Approve what’s waiting', module: null },
+  { label: 'Draft a post', module: 'posts' },
+  { label: 'Reply to latest message', module: 'messages' },
+  { label: 'Create a lead', module: 'leads' },
+  { label: 'Draft an invoice', module: 'money' },
+  { label: 'Plan a campaign', module: 'campaigns' },
 ]
 
 const FAB_POS_KEY = 'antarious-freya-fab-pos-v1'
-const FAB_W = 168
-const FAB_H = 56
-const FAB_W_STARTER = 200
-const FAB_H_STARTER = 68
+const PANEL_SIZE_KEY = 'antarious-freya-panel-size-v1'
+const CHAT_KEY_PREFIX = 'antarious-freya-chat-v1'
+const MAX_STORED_MSGS = 80
+/** Solid circular Freya button */
+const FAB_SIZE = 60
+const FAB_SIZE_STARTER = 64
 const MARGIN = 16
+const PANEL_MIN_W = 300
+const PANEL_MIN_H = 360
+const PANEL_DEFAULT_W = 400
+const PANEL_DEFAULT_H = 560
 
 type FabPos = { x: number; y: number }
+type PanelSize = { w: number; h: number }
+type PanelGeom = { x: number; y: number; w: number; h: number }
+
+function chatStorageKey(organizationId: string | null) {
+  return `${CHAT_KEY_PREFIX}:${organizationId || 'local'}`
+}
+
+function openerMessage(owner: string, biz: string, people: string, canCampaigns: boolean): ChatMsg {
+  const extras = canCampaigns
+    ? `create a lead, draft an invoice, or plan a campaign for ${biz}`
+    : `create a lead or draft an invoice for ${biz}`
+  return {
+    id: 'c0',
+    role: 'freya',
+    text: `Hey ${owner}! Just tell me what you need — draft a post for your ${people}, reply to messages, ${extras}.`,
+  }
+}
+
+function loadChatMessages(
+  organizationId: string | null,
+  opener: ChatMsg,
+): ChatMsg[] {
+  try {
+    const raw = localStorage.getItem(chatStorageKey(organizationId))
+    if (!raw) return [opener]
+    const parsed = JSON.parse(raw) as ChatMsg[]
+    if (!Array.isArray(parsed) || !parsed.length) return [opener]
+    const cleaned = parsed
+      .filter(
+        (m) =>
+          m &&
+          typeof m.id === 'string' &&
+          (m.role === 'freya' || m.role === 'you') &&
+          typeof m.text === 'string',
+      )
+      .map((m) => ({
+        ...m,
+        working: false,
+        status: undefined,
+        cards: Array.isArray(m.cards) ? m.cards : undefined,
+        followUp: typeof m.followUp === 'string' ? m.followUp : undefined,
+      }))
+      .filter((m) => m.text.trim().length > 0 || (m.cards && m.cards.length > 0) || m.followUp)
+    if (!cleaned.length) return [opener]
+    return cleaned.slice(-MAX_STORED_MSGS)
+  } catch {
+    return [opener]
+  }
+}
+
+function saveChatMessages(organizationId: string | null, messages: ChatMsg[]) {
+  try {
+    const slim = messages
+      .filter((m) => !m.working && (m.text?.trim() || m.cards?.length || m.followUp))
+      .map(({ working: _w, status: _s, ...rest }) => rest)
+      .slice(-MAX_STORED_MSGS)
+    localStorage.setItem(chatStorageKey(organizationId), JSON.stringify(slim))
+  } catch {
+    /* quota / private mode */
+  }
+}
 
 function fabSize(starter: boolean) {
-  return starter ? { w: FAB_W_STARTER, h: FAB_H_STARTER } : { w: FAB_W, h: FAB_H }
+  const s = starter ? FAB_SIZE_STARTER : FAB_SIZE
+  return { w: s, h: s }
 }
 
 function mobileTabInset() {
@@ -85,6 +162,60 @@ function clampPos(pos: FabPos, starter = false): FabPos {
   }
 }
 
+function loadPanelSize(): PanelSize {
+  try {
+    const raw = localStorage.getItem(PANEL_SIZE_KEY)
+    if (!raw) return { w: PANEL_DEFAULT_W, h: PANEL_DEFAULT_H }
+    const parsed = JSON.parse(raw) as PanelSize
+    if (typeof parsed.w !== 'number' || typeof parsed.h !== 'number') {
+      return { w: PANEL_DEFAULT_W, h: PANEL_DEFAULT_H }
+    }
+    return {
+      w: Math.min(Math.max(PANEL_MIN_W, parsed.w), Math.max(PANEL_MIN_W, window.innerWidth - MARGIN * 2)),
+      h: Math.min(Math.max(PANEL_MIN_H, parsed.h), Math.max(PANEL_MIN_H, window.innerHeight - MARGIN * 2)),
+    }
+  } catch {
+    return { w: PANEL_DEFAULT_W, h: PANEL_DEFAULT_H }
+  }
+}
+
+function clampPanelGeom(g: PanelGeom): PanelGeom {
+  if (typeof window === 'undefined') return g
+  const maxW = Math.max(PANEL_MIN_W, window.innerWidth - MARGIN * 2)
+  const maxH = Math.max(PANEL_MIN_H, window.innerHeight - MARGIN * 2 - mobileTabInset())
+  const w = Math.min(maxW, Math.max(PANEL_MIN_W, g.w))
+  const h = Math.min(maxH, Math.max(PANEL_MIN_H, g.h))
+  const maxX = Math.max(MARGIN, window.innerWidth - w - MARGIN)
+  const maxY = Math.max(MARGIN, window.innerHeight - h - MARGIN - mobileTabInset())
+  return {
+    w,
+    h,
+    x: Math.min(maxX, Math.max(MARGIN, g.x)),
+    y: Math.min(maxY, Math.max(MARGIN, g.y)),
+  }
+}
+
+/** Open panel anchored to the Freya button’s current spot. */
+function panelGeomAtFab(fab: FabPos, starter: boolean, size: PanelSize): PanelGeom {
+  const { w: fw, h: fh } = fabSize(starter)
+  const fabRight = fab.x + fw
+  const fabBottom = fab.y + fh
+  // Prefer opening above the button, right edges aligned with the FAB.
+  let x = fabRight - size.w
+  let y = fab.y - size.h - 10
+  // If no room above, open to the left of the button at the same vertical band.
+  if (y < MARGIN) {
+    y = Math.max(MARGIN, fab.y + fh / 2 - size.h / 2)
+    x = fab.x - size.w - 10
+  }
+  // Still clipped? Fall back so the panel covers the FAB location.
+  if (x < MARGIN) {
+    x = Math.max(MARGIN, fabRight - size.w)
+    y = Math.max(MARGIN, Math.min(fabBottom - size.h, window.innerHeight - size.h - MARGIN))
+  }
+  return clampPanelGeom({ x, y, w: size.w, h: size.h })
+}
+
 function wantsApproveAll(text: string) {
   const t = text.toLowerCase()
   return (
@@ -96,10 +227,97 @@ function wantsApproveAll(text: string) {
   )
 }
 
+function FreyaTurn({
+  message,
+  onOpenPath,
+}: {
+  message: ChatMsg
+  onOpenPath: (path: string) => void
+}) {
+  const showBody = Boolean(message.text?.trim())
+  const cards = message.cards ?? []
+  const followUp = message.followUp?.trim()
+
+  return (
+    <div className="flex gap-2">
+      <FreyaAvatar size={28} />
+      <div className="flex min-w-0 max-w-[85%] flex-col gap-2">
+        {message.working && (
+          <div className="freya-status-line rounded-2xl border border-sky/20 bg-sky-soft/70 px-3.5 py-2.5 text-[12px] font-medium text-sky">
+            <span className="freya-status-dot" aria-hidden />
+            <span>{message.status || 'Working on it…'}</span>
+          </div>
+        )}
+
+        {showBody && (
+          <div className="rounded-2xl border border-sky/15 bg-white px-3.5 py-2.5 text-[13px] text-ink shadow-sm whitespace-pre-wrap">
+            {message.text}
+          </div>
+        )}
+
+        {cards.map((card) => (
+          <div
+            key={card.id}
+            className="overflow-hidden rounded-2xl border border-sky/20 bg-white shadow-sm"
+          >
+            <div className="border-b border-sky/10 bg-gradient-to-r from-sky-soft/80 to-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-sky">
+              {card.title}
+            </div>
+            <div className="px-3.5 py-2.5 text-[13px] leading-relaxed text-ink whitespace-pre-wrap">
+              {card.body}
+            </div>
+            {(card.meta || card.path) && (
+              <div className="flex items-center justify-between gap-2 border-t border-sky/10 px-3 py-1.5 text-[11px] text-slate-500">
+                <span className="truncate">{card.meta}</span>
+                {card.path && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenPath(card.path!)}
+                    className="shrink-0 font-semibold text-sky hover:underline"
+                  >
+                    Open
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {followUp && !message.working && (
+          <div className="rounded-2xl border border-dashed border-teal-300/60 bg-teal-50/50 px-3.5 py-2.5 text-[13px] text-ink">
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-teal-700/80">
+              Follow-up
+            </div>
+            <div className="whitespace-pre-wrap">{followUp}</div>
+          </div>
+        )}
+
+        {!message.working && !showBody && !cards.length && !followUp && (
+          <div className="rounded-2xl border border-sky/15 bg-white px-3.5 py-2.5 text-[13px] text-ink shadow-sm">
+            Done.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function AskFreya() {
   const navigate = useNavigate()
   const { backend } = useBackendMode()
-  const { profile, prefs, startTour, planTier, spendAiCredits, aiCreditsRemaining } = useApp()
+  const {
+    profile,
+    prefs,
+    startTour,
+    planTier,
+    spendAiCredits,
+    aiCreditsRemaining,
+    organizationId,
+    canAccess,
+    canAccessRoute,
+    hydrated,
+    hydrateFromBackend,
+  } = useApp()
   const isStarter = planTier === 'starter'
   const {
     panelOpen,
@@ -111,25 +329,23 @@ export function AskFreya() {
     approveAll,
     refresh: refreshActivity,
   } = useFreyaActivity()
-  const { approveAllDrafts } = useInbox()
-  const { overdueInvoices } = useMoney()
+  const { approveAllDrafts, refresh: refreshInbox } = useInbox()
+  const { overdueInvoices, refresh: refreshMoney } = useMoney()
+  const { refresh: refreshContent } = useContent()
+  const { refresh: refreshLeads } = useLeads()
+  const { refresh: refreshCampaigns } = useCampaigns()
+  const { refresh: refreshCrm } = useCrm()
   const owner = profile?.ownerName || 'there'
   const biz = profile?.businessName || 'your business'
   const people = audienceWord(profile?.customers, profile?.industry, profile?.audienceServe)
 
-  const suggestions =
-    planTier === 'scale'
-      ? SUGGESTIONS_SCALE
-      : planTier === 'growth'
-        ? SUGGESTIONS_GROWTH
-        : SUGGESTIONS_STARTER
+  const suggestions = SUGGESTION_CHIPS.filter(
+    (c) => !c.module || canAccessModule(planTier, c.module),
+  ).map((c) => c.label)
 
+  const chatKeyRef = useRef<string | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>(() => [
-    {
-      id: 'c0',
-      role: 'freya',
-      text: `Hey ${owner}! Just tell me what you need — approve what’s waiting, draft a post for your ${people}, check messages, or look at money for ${biz}.`,
-    },
+    openerMessage(owner, biz, people, canAccessModule(planTier, 'campaigns')),
   ])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -138,6 +354,12 @@ export function AskFreya() {
 
   const [pos, setPos] = useState<FabPos>(() => loadPos(false))
   const [dragging, setDragging] = useState(false)
+  const [panelGeom, setPanelGeom] = useState<PanelGeom>(() => {
+    const size = typeof window !== 'undefined' ? loadPanelSize() : { w: PANEL_DEFAULT_W, h: PANEL_DEFAULT_H }
+    return { x: 24, y: 24, ...size }
+  })
+  const [panelDragging, setPanelDragging] = useState(false)
+  const [panelResizing, setPanelResizing] = useState(false)
   const dragRef = useRef<{
     pointerId: number
     startX: number
@@ -146,6 +368,37 @@ export function AskFreya() {
     originY: number
     moved: boolean
   } | null>(null)
+  const panelDragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    originX: number
+    originY: number
+  } | null>(null)
+  const panelResizeRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    originW: number
+    originH: number
+    originX: number
+    originY: number
+  } | null>(null)
+
+  // Load persisted chat once org (or local demo) is known.
+  useEffect(() => {
+    if (!hydrated) return
+    const key = chatStorageKey(organizationId)
+    if (chatKeyRef.current === key) return
+    chatKeyRef.current = key
+    const opener = openerMessage(owner, biz, people, canAccess('campaigns'))
+    setMessages(loadChatMessages(organizationId, opener))
+  }, [hydrated, organizationId, owner, biz, people, canAccess])
+
+  useEffect(() => {
+    if (!hydrated || !chatKeyRef.current) return
+    saveChatMessages(organizationId, messages)
+  }, [messages, organizationId, hydrated])
 
   useEffect(() => {
     setPos((p) => clampPos(p, isStarter))
@@ -158,6 +411,7 @@ export function AskFreya() {
   useEffect(() => {
     function onResize() {
       setPos((p) => clampPos(p, isStarter))
+      setPanelGeom((g) => clampPanelGeom(g))
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
@@ -166,6 +420,47 @@ export function AskFreya() {
   useEffect(() => {
     return () => abortRef.current?.abort()
   }, [])
+
+  function openAtFab(tab: 'chat' | 'activity') {
+    openPanel(tab)
+  }
+
+  // Whenever the panel opens (FAB, TopBar, Home…), place it at the Freya button.
+  const panelWasOpen = useRef(false)
+  useEffect(() => {
+    if (!panelOpen) {
+      panelWasOpen.current = false
+      return
+    }
+    if (panelWasOpen.current) return
+    panelWasOpen.current = true
+    setPanelGeom((g) => panelGeomAtFab(pos, isStarter, { w: g.w, h: g.h }))
+  }, [panelOpen, pos, isStarter])
+
+  async function refreshAfterTools(modules?: FreyaRefreshModule[]) {
+    const set = new Set(modules?.length ? modules : (['activity'] as FreyaRefreshModule[]))
+    const jobs: Promise<unknown>[] = []
+    if (set.has('activity')) jobs.push(refreshActivity())
+    if (set.has('content') && canAccess('posts')) jobs.push(refreshContent())
+    if (set.has('inbox') && canAccess('messages')) jobs.push(refreshInbox())
+    if (set.has('leads') && canAccess('leads')) jobs.push(refreshLeads())
+    if (set.has('campaigns') && canAccess('campaigns')) jobs.push(refreshCampaigns())
+    if (set.has('money') && canAccess('money')) jobs.push(refreshMoney())
+    if (set.has('crm') && canAccess('customers')) jobs.push(refreshCrm())
+    if (set.has('profile')) {
+      jobs.push(
+        hydrateFromBackend().then((me) => {
+          if (me?.profile?.ownerName) {
+            rememberUser({
+              name: me.profile.ownerName,
+              email: undefined,
+            })
+          }
+        }),
+      )
+    }
+    await Promise.allSettled(jobs)
+  }
 
   function runIntent(text: string) {
     if (!spendAiCredits(1)) {
@@ -192,7 +487,7 @@ export function AskFreya() {
       if (action === 'closePanel') closePanel()
     }
 
-    if (result.navigate) {
+    if (result.navigate && canAccessRoute(result.navigate)) {
       navigate(result.navigate, { state: result.navigateState ?? null })
     }
 
@@ -201,7 +496,16 @@ export function AskFreya() {
 
   async function sendBackend(text: string, history: ChatMsg[]) {
     const replyId = `f${Date.now() + 1}`
-    setMessages((prev) => [...prev, { id: replyId, role: 'freya', text: '…' }])
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: replyId,
+        role: 'freya',
+        text: '',
+        working: true,
+        status: 'Looking at what you need…',
+      },
+    ])
 
     abortRef.current?.abort()
     const ac = new AbortController()
@@ -209,43 +513,100 @@ export function AskFreya() {
 
     try {
       if (wantsApproveAll(text)) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === replyId ? { ...m, status: 'Approving what’s waiting…' } : m,
+          ),
+        )
         await approveFreyaActivities({ approveAll: true })
         approveAllDrafts()
-        await refreshActivity()
+        await refreshAfterTools([
+          'activity',
+          'content',
+          'inbox',
+          'leads',
+          'campaigns',
+          'money',
+          'crm',
+        ])
       }
 
       const result = await streamFreyaChat(
         history,
-        (partial) => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === replyId ? { ...m, text: partial || '…' } : m)),
-          )
+        {
+          onStatus: (status) => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === replyId ? { ...m, working: true, status } : m)),
+            )
+          },
+          onDelta: (partial) => {
+            const split = splitFreyaReply(partial)
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === replyId
+                  ? {
+                      ...m,
+                      working: true,
+                      status: m.status || 'Writing your reply…',
+                      text: split.body || partial,
+                      followUp: split.followUp,
+                    }
+                  : m,
+              ),
+            )
+          },
         },
         ac.signal,
       )
 
+      const split = splitFreyaReply(result.text || 'Done.')
       setMessages((prev) =>
-        prev.map((m) => (m.id === replyId ? { ...m, text: result.text || 'Done.' } : m)),
+        prev.map((m) =>
+          m.id === replyId
+            ? {
+                ...m,
+                working: false,
+                status: undefined,
+                text: result.text || split.body || 'Done.',
+                followUp: result.followUp ?? split.followUp,
+                cards: result.cards,
+              }
+            : m,
+        ),
       )
 
+      await refreshAfterTools(result.refreshModules)
+
       if (result.openActivity) setPanelTab('activity')
-      if (result.navigatePath) {
+      if (result.navigatePath && canAccessRoute(result.navigatePath)) {
         navigate(result.navigatePath, {
           state: result.focusPostId
             ? { focusPostId: result.focusPostId, tab: 'feed' as const }
             : undefined,
         })
-        closePanel()
+        if (!result.navigatePath.startsWith('/app/settings')) {
+          closePanel()
+        }
       }
-      void refreshActivity()
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return
       const message =
         err instanceof Error ? err.message : 'Something went wrong talking to Freya.'
       if (/failed to fetch|network|401|403/i.test(message)) {
         const replyText = runIntent(text)
+        const split = splitFreyaReply(replyText)
         setMessages((prev) =>
-          prev.map((m) => (m.id === replyId ? { ...m, text: replyText } : m)),
+          prev.map((m) =>
+            m.id === replyId
+              ? {
+                  ...m,
+                  working: false,
+                  status: undefined,
+                  text: split.body || replyText,
+                  followUp: split.followUp,
+                }
+              : m,
+          ),
         )
         return
       }
@@ -254,6 +615,8 @@ export function AskFreya() {
           m.id === replyId
             ? {
                 ...m,
+                working: false,
+                status: undefined,
                 text:
                   message.includes('credits') || message.includes('CREDITS')
                     ? `I'm out of AI credits (${aiCreditsRemaining} left). Grab a pack in Settings.`
@@ -281,7 +644,13 @@ export function AskFreya() {
     }
 
     const replyText = runIntent(text)
-    const reply: ChatMsg = { id: `f${Date.now() + 1}`, role: 'freya', text: replyText }
+    const split = splitFreyaReply(replyText)
+    const reply: ChatMsg = {
+      id: `f${Date.now() + 1}`,
+      role: 'freya',
+      text: split.body || replyText,
+      followUp: split.followUp,
+    }
     setMessages((prev) => [...prev, you, reply])
   }
 
@@ -327,62 +696,171 @@ export function AskFreya() {
       })
       return
     }
-    openPanel(isStarter ? 'chat' : waitingCount > 0 ? 'activity' : 'chat')
+    openAtFab(isStarter ? 'chat' : waitingCount > 0 ? 'activity' : 'chat')
+  }
+
+  function onPanelHeaderPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest('button')) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    panelDragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: panelGeom.x,
+      originY: panelGeom.y,
+    }
+    setPanelDragging(true)
+  }
+
+  function onPanelHeaderPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = panelDragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    setPanelGeom((g) =>
+      clampPanelGeom({
+        ...g,
+        x: d.originX + (e.clientX - d.startX),
+        y: d.originY + (e.clientY - d.startY),
+      }),
+    )
+  }
+
+  function onPanelHeaderPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = panelDragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* */
+    }
+    panelDragRef.current = null
+    setPanelDragging(false)
+    setPanelGeom((g) => clampPanelGeom(g))
+  }
+
+  function onResizePointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    panelResizeRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originW: panelGeom.w,
+      originH: panelGeom.h,
+      originX: panelGeom.x,
+      originY: panelGeom.y,
+    }
+    setPanelResizing(true)
+  }
+
+  function onResizePointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = panelResizeRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    const nextW = d.originW + (e.clientX - d.startX)
+    const nextH = d.originH + (e.clientY - d.startY)
+    setPanelGeom(
+      clampPanelGeom({
+        x: d.originX,
+        y: d.originY,
+        w: nextW,
+        h: nextH,
+      }),
+    )
+  }
+
+  function onResizePointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = panelResizeRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      /* */
+    }
+    panelResizeRef.current = null
+    setPanelResizing(false)
+    setPanelGeom((g) => {
+      const next = clampPanelGeom(g)
+      localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify({ w: next.w, h: next.h }))
+      return next
+    })
   }
 
   return (
     <>
-      <button
-        type="button"
-        onPointerDown={onFabPointerDown}
-        onPointerMove={onFabPointerMove}
-        onPointerUp={onFabPointerUp}
-        onPointerCancel={onFabPointerUp}
-        className={`freya-fab-bob fixed z-40 flex touch-none items-center gap-3 rounded-full bg-gradient-to-r from-sky via-sky-bright to-teal-400 text-left text-white shadow-xl shadow-sky/40 ring-2 ring-white/50 select-none ${
-          isStarter ? 'px-5 py-3.5' : 'px-4 py-2.5'
-        } ${dragging ? 'dragging scale-105 cursor-grabbing' : 'cursor-grab hover:brightness-105'}`}
-        style={{ left: pos.x, top: pos.y }}
-        title="Drag to move · tap to talk"
-      >
-        <GripHorizontal className="absolute -top-1 left-1/2 h-3 w-3 -translate-x-1/2 text-white/50" />
-        <div className="relative">
-          <FreyaAvatar size={isStarter ? 44 : 36} online />
-          {waitingCount > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-sunshine px-1 text-[10px] font-bold text-navy-deep ring-2 ring-sky">
-              {waitingCount}
-            </span>
-          )}
-        </div>
-        <div>
-          <div className={`leading-tight font-bold ${isStarter ? 'text-[15px]' : 'text-[13px]'}`}>
-            {isStarter ? 'Talk to Freya' : 'Ask Freya'}
+      {!panelOpen && (
+        <button
+          type="button"
+          onPointerDown={onFabPointerDown}
+          onPointerMove={onFabPointerMove}
+          onPointerUp={onFabPointerUp}
+          onPointerCancel={onFabPointerUp}
+          aria-label={
+            waitingCount > 0
+              ? `Ask Freya · ${waitingCount} need your OK`
+              : 'Ask Freya'
+          }
+          title="Ask Freya · drag to move"
+          className={`freya-fab-bob fixed z-40 flex touch-none items-center justify-center rounded-full bg-sky text-white ring-2 ring-white/90 select-none ${
+            dragging
+              ? 'dragging scale-105 cursor-grabbing shadow-xl shadow-sky/45'
+              : 'cursor-grab shadow-[0_10px_28px_-6px_rgba(2,132,199,0.55)] hover:bg-sky-bright hover:shadow-[0_14px_32px_-6px_rgba(2,132,199,0.65)]'
+          }`}
+          style={{
+            left: pos.x,
+            top: pos.y,
+            width: fabSize(isStarter).w,
+            height: fabSize(isStarter).h,
+          }}
+        >
+          <div className="relative">
+            <FreyaAvatar size={isStarter ? 40 : 36} online />
+            {waitingCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-sunshine px-1 text-[10px] font-bold text-navy-deep ring-2 ring-white">
+                {waitingCount > 9 ? '9+' : waitingCount}
+              </span>
+            )}
           </div>
-          <div className={`text-white/90 ${isStarter ? 'text-[12px]' : 'text-[11px]'}`}>
-            {waitingCount > 0
-              ? `${waitingCount} need your OK`
-              : isStarter
-                ? 'Just say what you need'
-                : 'Drag me · tap to chat'}
-          </div>
-        </div>
-      </button>
+        </button>
+      )}
 
       {panelOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-end bg-navy-deep/25 p-4 backdrop-blur-[3px] sm:p-6"
-          onClick={closePanel}
-        >
+        <>
+          <button
+            type="button"
+            aria-label="Close Freya"
+            className="fixed inset-0 z-40 cursor-default bg-navy-deep/20 backdrop-blur-[2px]"
+            onClick={closePanel}
+          />
           <div
-            className="flex h-[min(640px,88vh)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-sky/15"
+            className={`fixed z-50 flex flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-sky/15 ${
+              panelDragging || panelResizing ? 'select-none' : ''
+            }`}
+            style={{
+              left: panelGeom.x,
+              top: panelGeom.y,
+              width: panelGeom.w,
+              height: panelGeom.h,
+            }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between bg-gradient-to-r from-navy-mid via-[#16324a] to-[#0e7490] px-4 py-3 text-white">
-              <div className="flex items-center gap-2.5">
+            <div
+              onPointerDown={onPanelHeaderPointerDown}
+              onPointerMove={onPanelHeaderPointerMove}
+              onPointerUp={onPanelHeaderPointerUp}
+              onPointerCancel={onPanelHeaderPointerUp}
+              className={`flex shrink-0 touch-none items-center justify-between bg-navy-mid px-4 py-3 text-white ${
+                panelDragging ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+              title="Drag to move panel"
+            >
+              <div className="flex min-w-0 items-center gap-2.5">
+                <GripHorizontal className="h-4 w-4 shrink-0 text-white/45" />
                 <FreyaAvatar size={36} online />
-                <div>
+                <div className="min-w-0">
                   <div className="text-sm font-bold">Freya</div>
-                  <div className="text-[11px] text-online">
-                    ● {backend ? 'Online · workspace' : 'Online · demo'} · your AI teammate
+                  <div className="truncate text-[11px] text-online">
+                    ● {backend ? 'Online · workspace' : 'Online · demo'} · drag header · resize corner
                   </div>
                 </div>
               </div>
@@ -390,12 +868,13 @@ export function AskFreya() {
                 type="button"
                 onClick={closePanel}
                 className="rounded-lg p-1.5 hover:bg-white/10"
+                aria-label="Close"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="flex shrink-0 gap-1 border-b border-sky/10 bg-gradient-to-r from-sky-soft/80 to-amber-50/60 px-2 py-1.5">
+            <div className="flex shrink-0 gap-1 border-b border-sky/10 bg-sky-soft/50 px-2 py-1.5">
               <button
                 type="button"
                 onClick={() => setPanelTab('chat')}
@@ -431,25 +910,29 @@ export function AskFreya() {
               <>
                 <div
                   ref={listRef}
-                  className="flex-1 space-y-3 overflow-y-auto bg-gradient-to-b from-sky-soft/40 to-page p-4"
+                  className="min-h-0 flex-1 space-y-3 overflow-y-auto scrollbar-none bg-page p-4"
                 >
                   {messages.map((m) =>
-                    m.role === 'freya' ? (
-                      <div key={m.id} className="flex gap-2">
-                        <FreyaAvatar size={28} />
-                        <div className="max-w-[80%] rounded-2xl border border-sky/15 bg-white px-3.5 py-2.5 text-[13px] text-ink shadow-sm">
+                    m.role === 'you' ? (
+                      <div key={m.id} className="flex justify-end">
+                        <div className="max-w-[80%] rounded-2xl bg-sky px-3.5 py-2.5 text-[13px] text-white shadow-sm whitespace-pre-wrap">
                           {m.text}
                         </div>
                       </div>
                     ) : (
-                      <div key={m.id} className="flex justify-end">
-                        <div className="max-w-[80%] rounded-2xl bg-gradient-to-r from-sky to-teal-400 px-3.5 py-2.5 text-[13px] text-white shadow-sm">
-                          {m.text}
-                        </div>
-                      </div>
+                      <FreyaTurn
+                        key={m.id}
+                        message={m}
+                        onOpenPath={(path) => {
+                          if (canAccessRoute(path)) {
+                            navigate(path)
+                            closePanel()
+                          }
+                        }}
+                      />
                     ),
                   )}
-                  {messages.length < 3 && (
+                  {messages.length < 3 && !sending && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       {suggestions.map((s) => (
                         <button
@@ -465,7 +948,7 @@ export function AskFreya() {
                     </div>
                   )}
                 </div>
-                <form onSubmit={send} className="flex gap-2 border-t border-sky/10 bg-white p-3">
+                <form onSubmit={send} className="flex shrink-0 gap-2 border-t border-sky/10 bg-white p-3">
                   <input
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -476,7 +959,7 @@ export function AskFreya() {
                   <button
                     type="submit"
                     disabled={!draft.trim() || sending}
-                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky to-teal-400 text-white hover:brightness-105 disabled:opacity-50"
+                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky text-white hover:bg-sky-bright disabled:opacity-50"
                   >
                     <Send className="h-4 w-4" />
                   </button>
@@ -487,8 +970,22 @@ export function AskFreya() {
                 <FreyaActivityFeed onNavigated={closePanel} />
               </div>
             )}
+
+            <div
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={onResizePointerUp}
+              onPointerCancel={onResizePointerUp}
+              className={`absolute bottom-0 right-0 z-10 h-5 w-5 touch-none cursor-se-resize ${
+                panelResizing ? 'bg-sky/20' : ''
+              }`}
+              title="Drag to resize"
+              aria-label="Resize Freya panel"
+            >
+              <span className="pointer-events-none absolute bottom-1.5 right-1.5 h-2.5 w-2.5 border-r-2 border-b-2 border-slate-400/70" />
+            </div>
           </div>
-        </div>
+        </>
       )}
     </>
   )

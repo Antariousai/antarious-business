@@ -3,7 +3,8 @@ import { X } from 'lucide-react'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
 import { useApp } from '../context/AppContext'
 import { usePipeline } from '../context/PipelineContext'
-import { DEAL_STAGES, type DealPriority, type DealStage } from '../data/pipelineData'
+import { useFunnelStages } from '../context/FunnelStagesContext'
+import { type DealPriority, type DealStage } from '../data/pipelineData'
 import type { CrmSegment } from '../data/crmData'
 import { freyaFillDeal, type FreyaBizContext } from '../lib/freyaCreationHelpers'
 
@@ -15,6 +16,7 @@ export function AddDealModal({
   defaultStage?: DealStage
 }) {
   const { addDeal } = usePipeline()
+  const { crmStages } = useFunnelStages()
   const { profile, prefs } = useApp()
   const bizCtx: FreyaBizContext = {
     businessName: profile?.businessName,
@@ -215,8 +217,8 @@ export function AddDealModal({
                     onChange={(e) => setStage(e.target.value as DealStage)}
                     className="h-11 w-full rounded-lg border border-slate-200 px-2.5 text-sm outline-none"
                   >
-                    {DEAL_STAGES.map((s) => (
-                      <option key={s.id} value={s.id}>
+                    {crmStages.map((s) => (
+                      <option key={s.key} value={s.key}>
                         {s.label}
                       </option>
                     ))}

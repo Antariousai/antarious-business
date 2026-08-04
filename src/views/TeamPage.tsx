@@ -41,6 +41,7 @@ export function TeamPage() {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('Editor')
   const [saved, setSaved] = useState(false)
+  const [savedNote, setSavedNote] = useState('Invite saved')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -102,7 +103,11 @@ export function TeamPage() {
       }
       setBusy(true)
       try {
-        await apiFetch('/api/team/invites', {
+        const res = await apiFetch<{
+          emailSent?: boolean
+          emailSkipped?: boolean
+          emailError?: string | null
+        }>('/api/team/invites', {
           method: 'POST',
           body: JSON.stringify({
             email: trimmedEmail,
@@ -112,8 +117,19 @@ export function TeamPage() {
         await loadTeam()
         setEmail('')
         setName('')
+        if (res.emailSent) {
+          setSavedNote(`Invite emailed to ${trimmedEmail}`)
+        } else if (res.emailSkipped) {
+          setSavedNote('Invite saved — email not configured yet. Copy the invite link.')
+        } else {
+          setSavedNote(
+            res.emailError
+              ? `Invite saved, but email failed: ${res.emailError}`
+              : 'Invite saved — copy the invite link.',
+          )
+        }
         setSaved(true)
-        window.setTimeout(() => setSaved(false), 2000)
+        window.setTimeout(() => setSaved(false), 4000)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Invite failed')
       } finally {
@@ -145,7 +161,7 @@ export function TeamPage() {
 
       {saved && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-200/60 bg-emerald-50 px-4 py-2.5 text-[13px] font-semibold text-emerald-700">
-          <Check className="h-4 w-4" /> {backend ? 'Invite saved' : 'Seat added'}
+          <Check className="h-4 w-4" /> {backend ? savedNote : 'Seat added'}
         </div>
       )}
       {error && (
@@ -199,16 +215,21 @@ export function TeamPage() {
 
       <Card className="p-5">
         <h3 className="mb-3 text-[15px] font-bold text-ink">Invite someone</h3>
+        <p className="mb-3 text-[13px] text-muted">
+          We’ll email them an accept link. Use their work or personal inbox — they must sign in with
+          that same address to join.
+        </p>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           {backend ? (
             <label className="block flex-1 text-[12px] font-semibold text-slate-500">
-              Email
+              Work or personal email
               <Input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="amina@example.com"
+                placeholder="amina@company.com or amina@gmail.com"
                 className="mt-1.5 h-11"
+                autoComplete="email"
               />
             </label>
           ) : (
@@ -247,7 +268,7 @@ export function TeamPage() {
           {seats.length} of {seatLimit} seats used
           {atCap ? ` · next invite adds a seat at ${formatBdt(SEAT_PRICE_MONTHLY)}/mo` : ''}
           {backend
-            ? ' · invite is stored (email delivery later).'
+            ? ' · invite email comes from Freya (invites@freya.antarious.com).'
             : ' (demo — no real invites sent).'}
         </p>
       </Card>

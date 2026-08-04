@@ -88,6 +88,16 @@ textarea {
   border-radius: 999px;
 }
 
+/* Hide scrollbar chrome; content still scrolls */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* Kanban: columns side-by-side; hide the horizontal scrollbar chrome */
 .kanban-board {
   scrollbar-width: none;
@@ -209,6 +219,32 @@ textarea {
 
 .freya-fab-bob.dragging {
   animation: none;
+}
+
+.freya-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.freya-status-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background: #0e7490;
+  animation: freya-status-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes freya-status-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
 }
 
 /* Templates — motion & atmosphere */
@@ -1339,6 +1375,149 @@ a,
   color: #0b1a28;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.login-chat-auth-input--with-toggle {
+  padding-right: 2.75rem;
+}
+
+.login-chat-auth-password-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.login-chat-auth-visibility {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.login-chat-auth-visibility:hover {
+  color: #0284c7;
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.login-password-rules {
+  display: grid;
+  gap: 0.3rem;
+  margin: -0.15rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login-password-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.login-password-rule.is-met {
+  color: #059669;
+}
+
+.login-password-sentence {
+  margin: -0.15rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+
+.login-password-sentence .is-met {
+  color: #059669;
+}
+
+.login-password-meter {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.4rem 0 0;
+}
+
+.login-password-meter-track {
+  flex: 1;
+  height: 0.25rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.login-password-meter-fill {
+  display: block;
+  height: 100%;
+  width: 25%;
+  border-radius: inherit;
+  background: #f43f5e;
+  transition: width 180ms ease, background-color 180ms ease;
+}
+
+.login-password-meter[data-score='1'] .login-password-meter-fill {
+  width: 25%;
+  background: #f43f5e;
+}
+
+.login-password-meter[data-score='2'] .login-password-meter-fill {
+  width: 50%;
+  background: #f59e0b;
+}
+
+.login-password-meter[data-score='3'] .login-password-meter-fill {
+  width: 75%;
+  background: #0ea5e9;
+}
+
+.login-password-meter[data-score='4'] .login-password-meter-fill {
+  width: 100%;
+  background: #059669;
+}
+
+.login-password-meter-label {
+  flex-shrink: 0;
+  min-width: 2.75rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #94a3b8;
+  text-align: right;
+}
+
+.login-password-meter[data-score='1'] .login-password-meter-label {
+  color: #e11d48;
+}
+
+.login-password-meter[data-score='2'] .login-password-meter-label {
+  color: #d97706;
+}
+
+.login-password-meter[data-score='3'] .login-password-meter-label {
+  color: #0284c7;
+}
+
+.login-password-meter[data-score='4'] .login-password-meter-label {
+  color: #059669;
+}
+
+.login-password-mismatch {
+  margin: -0.2rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #e11d48;
 }
 
 .login-chat-auth-input::placeholder {

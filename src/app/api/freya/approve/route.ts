@@ -75,6 +75,24 @@ async function applyPayload(
     return { applied: 'create_lead', lead_id: data.id }
   }
 
+  // Soft money action — marks draft invoice as sent (no payment rails).
+  if (action === 'mark_invoice_sent' && payload.invoice_id) {
+    const { data, error } = await supabase
+      .from('money_invoices')
+      .update({ status: 'sent' })
+      .eq('id', payload.invoice_id)
+      .eq('organization_id', organizationId)
+      .in('status', ['draft', 'sent'])
+      .select('id, status')
+      .maybeSingle()
+    if (error) throw error
+    return {
+      applied: data ? 'mark_invoice_sent' : 'noop',
+      invoice_id: payload.invoice_id,
+      soft: true,
+    }
+  }
+
   return { applied: 'noop', payload }
 }
 

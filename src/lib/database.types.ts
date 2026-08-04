@@ -66,6 +66,8 @@ export interface Database {
           business_type: string | null
           audience_serve: string | null
           team_size: string | null
+          cover_path: string | null
+          logo_path: string | null
           onboarded: boolean
           created_at: string
           updated_at: string
@@ -78,6 +80,8 @@ export interface Database {
           business_type?: string | null
           audience_serve?: string | null
           team_size?: string | null
+          cover_path?: string | null
+          logo_path?: string | null
           onboarded?: boolean
         }
         Update: Partial<Database['public']['Tables']['business_profiles']['Insert']>

@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  Camera,
   Check,
   Clock,
   Eye,
   Flame,
   Heart,
   Image as ImageIcon,
+  Loader2,
   Megaphone,
   MessageCircle,
   MessageSquare,
@@ -30,6 +32,8 @@ import { formatMoney } from '../data/moneyData'
 import { BOUTIQUE, type ContentPost, type Platform } from '../data/mockData'
 import type { FreyaActivityItem } from '../data/freyaActivityData'
 import { GOAL_OPTIONS } from '../data/mockData'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { uploadPostMedia } from '@/lib/mediaUpload'
 
 const PLATFORM_TONE: Record<string, string> = {
   Instagram: 'from-rose-500 to-orange-400',
@@ -110,18 +114,25 @@ const STATUS_TONE: Record<
 }
 
 export function CommandCentrePage() {
-  const { profile, prefs, canAccess } = useApp()
+  const { profile, prefs, canAccess, updateProfile } = useApp()
+  const { backend } = useBackendMode()
   const { posts: contentPosts } = useContent()
   const { leads } = useLeads()
   const { monthIncome, billsToPay, cashPosition, invoicesOwed } = useMoney()
   const { items: freyaActivity, openPanel, waitingCount, approve: approveFreyaItem, approveAll } =
     useFreyaActivity()
   const [seenStories, setSeenStories] = useState<Set<string>>(() => new Set())
+  const [uploading, setUploading] = useState<'cover' | 'logo' | null>(null)
+  const [brandError, setBrandError] = useState<string | null>(null)
+  const coverInputRef = useRef<HTMLInputElement>(null)
+  const logoInputRef = useRef<HTMLInputElement>(null)
 
   const showGrowthTools = canAccess('campaigns') || canAccess('leads')
   const owner = profile?.ownerName || 'Joy'
   const biz = profile?.businessName || "Nusrat's Boutique"
   const industry = profile?.industry || 'boutique retail'
+  const coverSrc = profile?.coverUrl || BOUTIQUE.boutiqueCounter
+  const logoSrc = profile?.logoUrl || BOUTIQUE.kurtiRack
   const freyaWaiting = freyaActivity.filter((a) => a.status === 'waiting')
   const approvalPosts = freyaWaiting.filter((a) => a.kind === 'post')
   const messages = freyaWaiting.filter((a) => a.kind === 'message')
@@ -139,6 +150,49 @@ export function CommandCentrePage() {
   function letFreyaRun() {
     approveAll()
     openPanel('activity')
+  }
+
+  async function uploadBrandImage(kind: 'cover' | 'logo', file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setBrandError('Please choose an image file (JPG, PNG, WebP, or GIF).')
+      return
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      setBrandError('Keep the image under 12MB.')
+      return
+    }
+    setBrandError(null)
+    setUploading(kind)
+    try {
+      if (backend) {
+        const uploaded = await uploadPostMedia(file)
+        updateProfile(
+          kind === 'cover'
+            ? { coverPath: uploaded.path, coverUrl: uploaded.url }
+            : { logoPath: uploaded.path, logoUrl: uploaded.url },
+        )
+      } else {
+        const url = URL.createObjectURL(file)
+        updateProfile(kind === 'cover' ? { coverUrl: url } : { logoUrl: url })
+      }
+    } catch (err) {
+      setBrandError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(null)
+    }
+  }
+
+  function onCoverFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    void uploadBrandImage('cover', file)
+  }
+
+  function onLogoFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    void uploadBrandImage('logo', file)
   }
 
   const todaySchedule = useMemo(
@@ -187,13 +241,24 @@ export function CommandCentrePage() {
     <div className="space-y-6 px-6 py-6 pb-24 md:px-8">
       {/* Profile-style hero — cover + shop logo + name (Facebook / Shopify) */}
       <section className="overflow-hidden rounded-[1.75rem] bg-[#0b1220] shadow-[0_24px_48px_-28px_rgba(14,165,233,0.4)] ring-1 ring-white/10">
+        <input
+          ref={coverInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={onCoverFile}
+        />
+        <input
+          ref={logoInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={onLogoFile}
+        />
+
         {/* Cover photo */}
-        <div className="relative h-36 w-full sm:h-44 md:h-52">
-          <img
-            src={BOUTIQUE.boutiqueCounter}
-            alt=""
-            className="h-full w-full object-cover"
-          />
+        <div className="group/cover relative h-36 w-full sm:h-44 md:h-52">
+          <img src={coverSrc} alt="" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#0b1220] via-[#0b1220]/35 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#0b1220]/50 via-transparent to-[#0b1220]/20" />
           <span className="absolute top-4 left-4 inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white/95 uppercase backdrop-blur-sm ring-1 ring-white/15">
@@ -206,23 +271,52 @@ export function CommandCentrePage() {
               {needsOk} need{needsOk === 1 ? 's' : ''} OK
             </span>
           )}
+          <button
+            type="button"
+            disabled={uploading === 'cover'}
+            onClick={() => coverInputRef.current?.click()}
+            className="absolute right-4 bottom-4 inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-[12px] font-bold text-white backdrop-blur-sm ring-1 ring-white/20 transition hover:bg-black/70 disabled:opacity-60 sm:opacity-0 sm:group-hover/cover:opacity-100"
+          >
+            {uploading === 'cover' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Camera className="h-3.5 w-3.5" />
+            )}
+            {uploading === 'cover' ? 'Uploading…' : 'Edit cover'}
+          </button>
         </div>
 
         {/* Shop identity strip */}
         <div className="relative px-5 pb-2 md:px-8">
           <div className="-mt-12 flex flex-wrap items-end gap-4 sm:-mt-14">
-            <div className="relative shrink-0">
+            <div className="group/logo relative shrink-0">
               <div className="h-24 w-24 overflow-hidden rounded-2xl bg-white p-1 shadow-xl shadow-black/40 ring-4 ring-[#0b1220] sm:h-28 sm:w-28 sm:rounded-3xl">
                 <img
-                  src={BOUTIQUE.kurtiRack}
+                  src={logoSrc}
                   alt=""
                   className="h-full w-full rounded-xl object-cover sm:rounded-2xl"
                 />
               </div>
+              <button
+                type="button"
+                disabled={uploading === 'logo'}
+                onClick={() => logoInputRef.current?.click()}
+                aria-label="Upload shop photo"
+                className="absolute inset-0 m-1 flex items-center justify-center rounded-xl bg-black/45 text-white opacity-100 transition sm:rounded-2xl sm:opacity-0 sm:group-hover/logo:opacity-100"
+              >
+                {uploading === 'logo' ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Camera className="h-5 w-5" />
+                )}
+              </button>
               <span className="absolute -right-1 -bottom-1 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-bright to-cyan-400 text-[13px] font-extrabold text-white shadow-md ring-2 ring-[#0b1220]">
                 {shopInitial}
               </span>
-              <span className="absolute top-1 right-1 h-3 w-3 rounded-full bg-online ring-2 ring-white" title="Online" />
+              <span
+                className="absolute top-1 right-1 h-3 w-3 rounded-full bg-online ring-2 ring-white"
+                title="Online"
+              />
             </div>
 
             <div className="min-w-0 flex-1 pb-1 pt-3 sm:pt-0">
@@ -245,6 +339,9 @@ export function CommandCentrePage() {
                   </span>
                 )}
               </p>
+              {brandError && (
+                <p className="mt-2 text-[12px] font-semibold text-rose-300">{brandError}</p>
+              )}
             </div>
 
             <button
@@ -576,7 +673,7 @@ export function CommandCentrePage() {
                 <button
                   type="button"
                   onClick={() => openPanel('chat')}
-                  className="font-bold text-amber-700 hover:underline"
+                  className="font-bold text-sky-bright hover:text-sky hover:underline"
                 >
                   Talk to Freya →
                 </button>

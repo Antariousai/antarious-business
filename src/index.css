@@ -89,6 +89,16 @@ textarea {
   border-radius: 999px;
 }
 
+/* Hide scrollbar chrome; content still scrolls */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* Kanban: columns side-by-side; hide the horizontal scrollbar chrome */
 .kanban-board {
   scrollbar-width: none;

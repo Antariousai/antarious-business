@@ -2,8 +2,9 @@ import { useRef } from 'react'
 import { ChevronDown, Mail, Pencil, Flame, Sun, Snowflake } from 'lucide-react'
 import { Avatar } from './Avatar'
 import { PlatformChip, PlatformIcon } from './PlatformIcon'
-import { LEAD_STAGES, LEAD_TAG_COLORS, type Lead } from '../data/leadsData'
+import { LEAD_TAG_COLORS, type Lead } from '../data/leadsData'
 import { useLeads } from '../context/LeadsContext'
+import { useFunnelStages } from '../context/FunnelStagesContext'
 
 function TempIcon({ temp }: { temp: Lead['temp'] }) {
   if (temp === 'hot') return <Flame className="h-3.5 w-3.5 text-red-500" fill="currentColor" />
@@ -29,7 +30,8 @@ function LeadDetails({
   onEdit: () => void
   compact?: boolean
 }) {
-  const stage = LEAD_STAGES.find((s) => s.id === lead.stage)
+  const { leadStageMeta } = useFunnelStages()
+  const stage = leadStageMeta(lead.stage)
 
   return (
     <div
@@ -244,21 +246,26 @@ export function LeadContactRow({
   expanded,
   onToggleExpand,
   onEdit,
+  highlightPick,
 }: {
   lead: Lead
   expanded: boolean
   onToggleExpand: () => void
   onEdit: () => void
+  highlightPick?: boolean
 }) {
   const { moveLead } = useLeads()
-  const stageLabel = lead.stage.charAt(0).toUpperCase() + lead.stage.slice(1)
+  const { leadStages, leadStageMeta } = useFunnelStages()
+  const stageLabel = leadStageMeta(lead.stage).label
 
   return (
     <div
       className={`rounded-2xl border bg-white shadow-sm transition ${
-        expanded
-          ? 'border-sky/40 shadow-md ring-2 ring-sky/15'
-          : 'border-slate-100 hover:border-sky/25 hover:shadow-md'
+        highlightPick
+          ? 'border-sky/50 ring-2 ring-sky/20 hover:border-sky'
+          : expanded
+            ? 'border-sky/40 shadow-md ring-2 ring-sky/15'
+            : 'border-slate-100 hover:border-sky/25 hover:shadow-md'
       }`}
     >
       <button
@@ -307,10 +314,11 @@ export function LeadContactRow({
             }}
             className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-semibold text-ink outline-none"
           >
-            <option value="new">New</option>
-            <option value="contacted">Contacted</option>
-            <option value="qualified">Qualified</option>
-            <option value="converted">Converted</option>
+            {leadStages.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
           </select>
           <ChevronDown
             className={`h-4 w-4 text-slate-400 transition ${expanded ? 'rotate-180 text-sky-bright' : ''}`}

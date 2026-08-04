@@ -72,7 +72,8 @@ export const PLAN_TIERS: Record<PlanTier, PlanEntitlements> = {
     priceMonthly: 1999,
     includedAiCredits: 1000,
     maxChannels: 2,
-    modules: ['today', 'posts', 'messages', 'customers', 'money', 'settings'],
+    // Leads included so Freya “create a lead” + Interested people work on day one.
+    modules: ['today', 'posts', 'messages', 'customers', 'leads', 'money', 'settings'],
     advancedCreate: false,
     deepMoney: false,
   },

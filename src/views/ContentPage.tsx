@@ -140,7 +140,7 @@ export function ContentPage() {
         }
       />
 
-      <div className="mb-4 inline-flex rounded-xl bg-white/80 p-1 shadow-sm ring-1 ring-rose-100">
+      <div className="mb-4 inline-flex rounded-xl bg-white/80 p-1 shadow-sm ring-1 ring-sky/15">
         {(
           [
             { id: 'feed', label: 'Feed', icon: LayoutGrid },
@@ -154,7 +154,7 @@ export function ContentPage() {
             onClick={() => setTab(t.id)}
             className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[13px] font-semibold transition ${
               tab === t.id
-                ? 'bg-gradient-to-r from-rose-500 to-orange-400 text-white shadow-sm'
+                ? 'bg-gradient-to-r from-sky-bright to-sky text-white shadow-sm shadow-sky/30'
                 : 'text-slate-500 hover:text-ink'
             }`}
           >
@@ -235,7 +235,7 @@ export function ContentPage() {
                     {post.status}
                   </span>
                 </div>
-                {post.image ? (
+                {post.image?.trim() ? (
                   <img src={post.image} alt="" className="mt-3 h-48 w-full object-cover" />
                 ) : (
                   <div className="mt-3 flex h-48 items-center justify-center bg-gradient-to-br from-sky-soft to-amber-50 text-[13px] font-semibold text-muted">
@@ -453,7 +453,17 @@ function ContentInsights({
                 key={post.id}
                 className={`relative overflow-hidden rounded-2xl ${height} ${place === 1 ? 'md:order-2' : place === 2 ? 'md:order-1' : 'md:order-3'}`}
               >
-                <img src={post.image} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                {post.image?.trim() ? (
+                  <img
+                    src={post.image}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-sky-soft via-white to-amber-50 text-[13px] font-semibold text-muted">
+                    No media
+                  </div>
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-navy-deep/90 via-navy-deep/25 to-transparent" />
                 <div className={`absolute inset-0 ring-2 ${ring} rounded-2xl pointer-events-none`} />
                 <span
@@ -702,11 +712,17 @@ function ContentInsights({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {topPosts.slice(3, 9).map((post) => (
               <div key={post.id} className="group relative aspect-square overflow-hidden rounded-xl">
-                <img
-                  src={post.image}
-                  alt=""
-                  className="h-full w-full object-cover transition group-hover:scale-105"
-                />
+                {post.image?.trim() ? (
+                  <img
+                    src={post.image}
+                    alt=""
+                    className="h-full w-full object-cover transition group-hover:scale-105"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-sky-soft to-amber-50 text-[11px] font-semibold text-muted">
+                    No media
+                  </div>
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-90" />
                 <div className="absolute inset-x-0 bottom-0 p-2.5 text-white">
                   <p className="line-clamp-2 text-[11px] font-semibold leading-snug">{post.caption}</p>
@@ -723,13 +739,13 @@ function ContentInsights({
 
         <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy-mid via-[#16324a] to-[#0e7490] p-5 text-white shadow-lg shadow-sky/15">
           <div className="pointer-events-none absolute -top-10 right-0 h-32 w-32 rounded-full bg-sunshine/20 blur-2xl" />
-          {first && (
+          {first?.image?.trim() ? (
             <img
               src={first.image}
               alt=""
               className="mb-4 h-28 w-full rounded-xl object-cover ring-2 ring-white/20"
             />
-          )}
+          ) : null}
           <div className="flex items-center gap-2 text-[11px] font-bold tracking-wide text-sky-muted uppercase">
             <Sparkles className="h-3.5 w-3.5 text-sunshine" />
             Freya&apos;s take

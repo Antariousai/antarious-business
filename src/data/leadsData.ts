@@ -1,14 +1,13 @@
-export type LeadStage = 'new' | 'contacted' | 'qualified' | 'converted'
+import { DEFAULT_LEAD_STAGES } from './funnelStages'
+
+export type LeadStage = string
 export type LeadTemp = 'hot' | 'warm' | 'cold'
 export type LeadSource = 'campaign' | 'freya-found' | 'manual' | 'inbox'
 export type LeadPlatform = 'instagram' | 'whatsapp' | 'facebook' | 'messenger' | 'other'
 
-export const LEAD_STAGES: { id: LeadStage; label: string; color: string }[] = [
-  { id: 'new', label: 'New', color: '#38bdf8' },
-  { id: 'contacted', label: 'Contacted', color: '#f97316' },
-  { id: 'qualified', label: 'Qualified', color: '#14b8a6' },
-  { id: 'converted', label: 'Converted', color: '#22c55e' },
-]
+/** Default catalog — prefer `useFunnelStages().leadStages` for org-custom steps. */
+export const LEAD_STAGES: { id: LeadStage; label: string; color: string }[] =
+  DEFAULT_LEAD_STAGES.map((s) => ({ id: s.key, label: s.label, color: s.color }))
 
 export const LEAD_TAG_COLORS: Record<string, string> = {
   Bridal: 'bg-pink-100 text-pink-700',

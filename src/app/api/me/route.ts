@@ -2,6 +2,10 @@ import { createClient } from '@/lib/supabase/server'
 import { requireOrgContext, jsonError } from '@/lib/org/context'
 import { getCreditBalance, getOrgPlanTier } from '@/lib/entitlements'
 import { getAiCreditPack, type AiCreditPackId, type PlanTier } from '@/data/planTiers'
+import {
+  applyBusinessProfilePatch,
+  signedBrandUrl,
+} from '@/lib/org/updateBusinessProfile'
 
 export const runtime = 'nodejs'
 
@@ -24,7 +28,7 @@ export async function GET() {
       supabase
         .from('business_profiles')
         .select(
-          'business_name, industry, customers, business_type, audience_serve, team_size, onboarded',
+          'business_name, industry, customers, business_type, audience_serve, team_size, onboarded, cover_path, logo_path',
         )
         .eq('organization_id', ctx.organizationId)
         .maybeSingle(),
@@ -49,6 +53,10 @@ export async function GET() {
 
     const bp = bpRes.data
     const prefs = prefsRes.data
+    const [coverUrl, logoUrl] = await Promise.all([
+      signedBrandUrl(supabase, bp?.cover_path),
+      signedBrandUrl(supabase, bp?.logo_path),
+    ])
 
     return Response.json({
       organizationId: ctx.organizationId,
@@ -65,6 +73,10 @@ export async function GET() {
         goals: (goalsRes.data ?? []).map((g) => g.goal_id),
         platforms: (platformsRes.data ?? []).map((p) => p.platform),
         planTier,
+        coverPath: bp?.cover_path ?? undefined,
+        logoPath: bp?.logo_path ?? undefined,
+        coverUrl,
+        logoUrl,
       },
       onboarded: Boolean(bp?.onboarded),
       prefs: {
@@ -113,53 +125,24 @@ export async function PATCH(req: Request) {
 
     if (body.profile && typeof body.profile === 'object') {
       const p = body.profile as Record<string, unknown>
-      const bpPatch: Record<string, unknown> = {}
-      if ('businessName' in p) bpPatch.business_name = p.businessName
-      if ('industry' in p) bpPatch.industry = p.industry
-      if ('customers' in p) bpPatch.customers = p.customers
-      if ('businessType' in p) bpPatch.business_type = p.businessType
-      if ('audienceServe' in p) bpPatch.audience_serve = p.audienceServe
-      if ('teamSize' in p) bpPatch.team_size = p.teamSize
-      if (Object.keys(bpPatch).length) {
-        const { error } = await supabase
-          .from('business_profiles')
-          .update(bpPatch)
-          .eq('organization_id', ctx.organizationId)
-        if (error) throw error
-      }
-      if ('ownerName' in p) {
-        await supabase
-          .from('profiles')
-          .update({ full_name: String(p.ownerName) })
-          .eq('id', ctx.user.id)
-      }
-      if (Array.isArray(p.goals)) {
-        await supabase.from('business_goals').delete().eq('organization_id', ctx.organizationId)
-        const goals = p.goals.map(String)
-        if (goals.length) {
-          await supabase.from('business_goals').insert(
-            goals.map((goal_id) => ({ organization_id: ctx.organizationId, goal_id })),
-          )
-        }
-      }
-      if (Array.isArray(p.platforms)) {
-        await supabase
-          .from('channel_preferences')
-          .delete()
-          .eq('organization_id', ctx.organizationId)
-        const platforms = p.platforms.map(String)
-        if (platforms.length) {
-          await supabase.from('channel_preferences').insert(
-            platforms.map((platform) => ({ organization_id: ctx.organizationId, platform })),
-          )
-        }
-      }
-      if ('planTier' in p) {
-        await supabase
-          .from('subscriptions')
-          .update({ plan_tier: p.planTier as PlanTier })
-          .eq('organization_id', ctx.organizationId)
-      }
+      await applyBusinessProfilePatch(supabase, {
+        organizationId: ctx.organizationId,
+        userId: ctx.user.id,
+        patch: {
+          ownerName: 'ownerName' in p ? String(p.ownerName) : undefined,
+          businessName: 'businessName' in p ? String(p.businessName) : undefined,
+          industry: 'industry' in p ? String(p.industry) : undefined,
+          customers: 'customers' in p ? String(p.customers) : undefined,
+          businessType: 'businessType' in p ? (p.businessType as string | null) : undefined,
+          audienceServe: 'audienceServe' in p ? (p.audienceServe as string | null) : undefined,
+          teamSize: 'teamSize' in p ? (p.teamSize as string | null) : undefined,
+          goals: Array.isArray(p.goals) ? p.goals.map(String) : undefined,
+          platforms: Array.isArray(p.platforms) ? p.platforms.map(String) : undefined,
+          planTier: 'planTier' in p ? (p.planTier as PlanTier) : undefined,
+          coverPath: 'coverPath' in p ? (p.coverPath as string | null) : undefined,
+          logoPath: 'logoPath' in p ? (p.logoPath as string | null) : undefined,
+        },
+      })
     }
 
     if (body.connectPlatform) {

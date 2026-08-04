@@ -14,7 +14,7 @@ import {
   type LeadStage,
   type LeadTemp,
 } from '../data/leadsData'
-import { apiFetch } from '@/lib/backend/api'
+import { apiFetch, ApiError } from '@/lib/backend/api'
 import { mapApiLead } from '@/lib/backend/mappers'
 import { useBackendMode } from '@/lib/backend/BackendModeContext'
 import { hasSupabaseEnv } from '@/lib/backend/mode'
@@ -73,8 +73,16 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!backend) return
-    const data = await apiFetch<{ leads: Parameters<typeof mapApiLead>[0][] }>('/api/leads')
-    setLeads((data.leads ?? []).map((row, i) => mapApiLead(row, i)))
+    try {
+      const data = await apiFetch<{ leads: Parameters<typeof mapApiLead>[0][] }>('/api/leads')
+      setLeads((data.leads ?? []).map((row, i) => mapApiLead(row, i)))
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        setLeads([])
+        return
+      }
+      throw err
+    }
   }, [backend])
 
   useEffect(() => {

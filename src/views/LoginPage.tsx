@@ -2,13 +2,20 @@
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp, Eye, EyeOff } from 'lucide-react'
 import { FreyaLoginFigure } from '../components/FreyaLoginFigure'
 import { LoginStageBackground } from '../components/LoginStageBackground'
 import { Logo } from '../components/Logo'
 import { useApp } from '../context/AppContext'
 import { FREYA_PERSONA } from '../data/freyaPersona'
 import { saveLoginHandoff } from '../lib/loginHandoff'
+import { getPasswordStrength, isStrongPassword } from '../lib/passwordRules'
+import {
+  clearRememberedUser,
+  getRememberedEmail,
+  getRememberedName,
+  rememberUser,
+} from '../lib/rememberedUser'
 
 type ChatMsg = { id: string; role: 'freya' | 'you'; text: string }
 type Step = 'name' | 'auth'
@@ -36,6 +43,11 @@ export function LoginPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [returningName, setReturningName] = useState<string | null>(null)
+  const [isReturningVisitor, setIsReturningVisitor] = useState(false)
   const [mode, setMode] = useState<'signup' | 'login'>('signup')
   const [authPanel, setAuthPanel] = useState<AuthPanel>('account')
   const [error, setError] = useState<string | null>(null)
@@ -43,14 +55,13 @@ export function LoginPage() {
   const [resetSent, setResetSent] = useState<string | null>(null)
   const [verified, setVerified] = useState(false)
   const [passwordReset, setPasswordReset] = useState(false)
-  const [messages, setMessages] = useState<ChatMsg[]>(() =>
-    FREYA_PERSONA.login.opener.map((text, i) => ({ id: `f${i}`, role: 'freya', text })),
-  )
+  const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [bootReady, setBootReady] = useState(false)
   const [typing, setTyping] = useState(false)
   const [sending, setSending] = useState(false)
   const [exiting, setExiting] = useState(false)
   const [inputFocused, setInputFocused] = useState(false)
-  const handoffRef = useRef<ChatMsg[]>(messages)
+  const handoffRef = useRef<ChatMsg[]>([])
   const threadRef = useRef<HTMLDivElement>(null)
   const ownerNameRef = useRef('')
   const bootstrapped = useRef(false)
@@ -72,7 +83,7 @@ export function LoginPage() {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, typing, step, verified, checkEmail, resetSent, authPanel])
 
-  // Deep-link from email confirmation / password reset / auth errors
+  // Deep-link from email confirmation / password reset / team invite / auth errors
   useEffect(() => {
     if (bootstrapped.current) return
     bootstrapped.current = true
@@ -82,10 +93,69 @@ export function LoginPage() {
     const modeParam = searchParams.get('mode')
     const emailParam = searchParams.get('email')?.trim() || ''
     const errParam = searchParams.get('error')
+    const inviteParam = searchParams.get('invite')?.trim() || ''
 
     if (emailParam) setEmail(emailParam)
 
-    if (isReset) {
+    const rememberedName = getRememberedName()
+    const rememberedEmail = getRememberedEmail()
+    if (!emailParam && rememberedEmail) setEmail(rememberedEmail)
+    if (rememberedName) {
+      ownerNameRef.current = rememberedName
+      setReturningName(rememberedName)
+    }
+
+    const isReturning = Boolean(rememberedName || rememberedEmail)
+    if (isReturning) setIsReturningVisitor(true)
+
+    function setWelcomeBackMessages(name: string | null) {
+      const msgs = FREYA_PERSONA.login.welcomeBack(name).map((text) => ({
+        id: uid(),
+        role: 'freya' as const,
+        text,
+      }))
+      setMessages(msgs)
+      handoffRef.current = msgs
+    }
+
+    function setOpenerMessages() {
+      const msgs = FREYA_PERSONA.login.opener.map((text) => ({
+        id: uid(),
+        role: 'freya' as const,
+        text,
+      }))
+      setMessages(msgs)
+      handoffRef.current = msgs
+    }
+
+    if (inviteParam && inviteParam !== 'accepted') {
+      try {
+        sessionStorage.setItem('antarious-pending-team-invite', inviteParam)
+      } catch {
+        /* ignore */
+      }
+      setStep('auth')
+      setMode('login')
+      setAuthPanel('account')
+      const msgs: ChatMsg[] = [
+        {
+          id: uid(),
+          role: 'freya',
+          text: rememberedName
+            ? `Hey ${rememberedName}. You’ve got a team invite waiting.`
+            : 'You’ve got a team invite waiting.',
+        },
+        {
+          id: uid(),
+          role: 'freya',
+          text: emailParam
+            ? `Sign in or create an account with ${emailParam} (the same inbox the invite was sent to), and I’ll add you to the workspace.`
+            : 'Sign in or create an account with the same email the invite was sent to (work or personal), and I’ll add you to the workspace.',
+        },
+      ]
+      setMessages(msgs)
+      handoffRef.current = msgs
+    } else if (isReset) {
       setPasswordReset(true)
       setVerified(false)
       setStep('auth')
@@ -95,7 +165,9 @@ export function LoginPage() {
         {
           id: uid(),
           role: 'freya',
-          text: 'Password updated — nice work.',
+          text: rememberedName
+            ? `Password updated. Nice work, ${rememberedName}.`
+            : 'Password updated. Nice work.',
         },
         {
           id: uid(),
@@ -117,7 +189,9 @@ export function LoginPage() {
         {
           id: uid(),
           role: 'freya',
-          text: 'You’re verified — welcome to Antarious.',
+          text: rememberedName
+            ? `You’re verified. Welcome to Antarious, ${rememberedName}.`
+            : 'You’re verified. Welcome to Antarious.',
         },
         {
           id: uid(),
@@ -133,39 +207,100 @@ export function LoginPage() {
       setStep('auth')
       setMode('login')
       setAuthPanel('forgot')
-    } else if (modeParam === 'login') {
+      setWelcomeBackMessages(rememberedName)
+    } else if (modeParam === 'login' || (isReturning && hasSupabaseEnv())) {
+      // Returning browser visitor (saved name or email): skip name ask.
       setStep('auth')
       setMode('login')
       setAuthPanel('account')
+      setWelcomeBackMessages(rememberedName)
     } else if (errParam) {
       setStep('auth')
       setMode('login')
       setAuthPanel('account')
+      setWelcomeBackMessages(rememberedName)
       setError(
         errParam === 'auth_callback' || errParam === 'auth_confirm'
           ? 'That confirmation link expired or already used. Log in if you already verified, or sign up again.'
           : decodeURIComponent(errParam),
       )
+    } else {
+      setStep('name')
+      setMode('signup')
+      setOpenerMessages()
     }
 
-    if (isVerified || isReset || errParam || emailParam || modeParam) {
+    if (
+      isVerified ||
+      isReset ||
+      errParam ||
+      emailParam ||
+      modeParam ||
+      inviteParam ||
+      (isReturning && hasSupabaseEnv())
+    ) {
       setSearchParams({}, { replace: true })
     }
+
+    setBootReady(true)
   }, [searchParams, setSearchParams])
 
   async function finishToOnboarding(displayName: string, fromBackend = false) {
     setExiting(true)
     await wait(520)
+
+    let pendingInvite: string | null = null
+    try {
+      pendingInvite = sessionStorage.getItem('antarious-pending-team-invite')
+      if (pendingInvite) sessionStorage.removeItem('antarious-pending-team-invite')
+    } catch {
+      pendingInvite = null
+    }
+
     if (fromBackend) {
       const me = await hydrateFromBackend()
+      const savedName = me?.profile?.ownerName?.trim() || displayName
+      rememberUser({ name: savedName, email: email.trim() || undefined })
+      setReturningName(savedName)
       saveLoginHandoff(handoffRef.current)
+      if (pendingInvite) {
+        window.location.assign(
+          `/api/team/invites/accept?token=${encodeURIComponent(pendingInvite)}`,
+        )
+        return
+      }
       if (me?.onboarded) navigate('/app')
       else navigate('/onboarding')
       return
     }
+    rememberUser({ name: displayName })
     login(displayName)
     saveLoginHandoff(handoffRef.current)
     navigate('/onboarding')
+  }
+
+  function startAsSomeoneElse() {
+    clearRememberedUser()
+    setReturningName(null)
+    setIsReturningVisitor(false)
+    ownerNameRef.current = ''
+    setEmail('')
+    setPassword('')
+    setConfirmPassword('')
+    setMode('signup')
+    setAuthPanel('account')
+    setStep('name')
+    setError(null)
+    setCheckEmail(null)
+    setVerified(false)
+    setPasswordReset(false)
+    const opener = FREYA_PERSONA.login.opener.map((text) => ({
+      id: uid(),
+      role: 'freya' as const,
+      text,
+    }))
+    setMessages(opener)
+    handoffRef.current = opener
   }
 
   async function onNameSubmit(e: FormEvent) {
@@ -175,6 +310,8 @@ export function LoginPage() {
 
     setSending(true)
     ownerNameRef.current = trimmed
+    rememberUser({ name: trimmed })
+    setReturningName(trimmed)
     const userMsg: ChatMsg = { id: uid(), role: 'you', text: trimmed }
     setMessages((prev) => {
       handoffRef.current = [...prev, userMsg]
@@ -214,7 +351,20 @@ export function LoginPage() {
       await onForgotSubmit()
       return
     }
-    if (!email.trim() || password.length < 6 || sending || exiting) return
+    if (!email.trim() || !password || sending || exiting) return
+    if (mode === 'signup') {
+      if (!isStrongPassword(password)) {
+        setError('Use 8+ characters with upper, lower, and a number.')
+        return
+      }
+      if (password !== confirmPassword) {
+        setError('Passwords don’t match.')
+        return
+      }
+    } else if (password.length < 6) {
+      setError('Enter your password.')
+      return
+    }
     setSending(true)
     setError(null)
 
@@ -241,6 +391,7 @@ export function LoginPage() {
           setCheckEmail(email.trim())
           setVerified(false)
           setSending(false)
+          rememberUser({ name: displayName, email: email.trim() })
           const youMsg: ChatMsg = {
             id: uid(),
             role: 'you',
@@ -363,6 +514,16 @@ export function LoginPage() {
                     <>
                       Reset <span className="login-accent">password</span>
                     </>
+                  ) : isReturningVisitor && step === 'auth' && !verified && !passwordReset && authPanel !== 'forgot' ? (
+                    returningName ? (
+                      <>
+                        Welcome back, <span className="login-accent">{returningName}</span>
+                      </>
+                    ) : (
+                      <>
+                        Welcome <span className="login-accent">back</span>
+                      </>
+                    )
                   ) : (
                     <>
                       Meet <span className="login-accent">Freya</span>
@@ -371,12 +532,14 @@ export function LoginPage() {
                 </h1>
                 <p className="login-support">
                   {passwordReset
-                    ? 'Your new password is ready — log in to continue.'
+                    ? 'Your new password is ready. Log in to continue.'
                     : verified
-                      ? 'Email confirmed — log in to continue with Freya.'
+                      ? 'Email confirmed. Log in to continue with Freya.'
                       : authPanel === 'forgot'
                         ? 'We’ll email you a secure link to choose a new password.'
-                        : FREYA_PERSONA.login.status}
+                        : isReturningVisitor && step === 'auth'
+                          ? 'Log in to open your workspace. No need to introduce yourself again.'
+                          : FREYA_PERSONA.login.status}
                 </p>
               </div>
 
@@ -385,7 +548,7 @@ export function LoginPage() {
               >
                 <div className="login-chat-tail" aria-hidden />
                 <div ref={threadRef} className="login-chat-thread">
-                  {messages.map((m, i) =>
+                  {!bootReady ? null : messages.map((m, i) =>
                     m.role === 'freya' ? (
                       <div
                         key={m.id}
@@ -542,6 +705,9 @@ export function LoginPage() {
                               setVerified(false)
                               setPasswordReset(false)
                               setError(null)
+                              setConfirmPassword('')
+                              setShowPassword(false)
+                              setShowConfirmPassword(false)
                             }}
                           >
                             Sign up
@@ -555,6 +721,9 @@ export function LoginPage() {
                               setMode('login')
                               setCheckEmail(null)
                               setError(null)
+                              setConfirmPassword('')
+                              setShowPassword(false)
+                              setShowConfirmPassword(false)
                             }}
                           >
                             Log in
@@ -601,21 +770,102 @@ export function LoginPage() {
                             </label>
                             <label className="login-chat-auth-field">
                               <span>Password</span>
-                              <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                onKeyDown={onKeyDown}
-                                onFocus={() => setInputFocused(true)}
-                                onBlur={() => setInputFocused(false)}
-                                placeholder="At least 6 characters"
-                                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                                autoFocus={verified || passwordReset}
-                                enterKeyHint="go"
-                                disabled={sending}
-                                className="login-chat-auth-input"
-                              />
+                              <div className="login-chat-auth-password-wrap">
+                                <input
+                                  type={showPassword ? 'text' : 'password'}
+                                  value={password}
+                                  onChange={(e) => setPassword(e.target.value)}
+                                  onKeyDown={onKeyDown}
+                                  onFocus={() => setInputFocused(true)}
+                                  onBlur={() => setInputFocused(false)}
+                                  placeholder={
+                                    mode === 'signup' ? 'Create a strong password' : 'Your password'
+                                  }
+                                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                                  autoFocus={verified || passwordReset}
+                                  enterKeyHint={mode === 'signup' ? 'next' : 'go'}
+                                  disabled={sending}
+                                  className="login-chat-auth-input login-chat-auth-input--with-toggle"
+                                />
+                                <button
+                                  type="button"
+                                  className="login-chat-auth-visibility"
+                                  onClick={() => setShowPassword((v) => !v)}
+                                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                  tabIndex={-1}
+                                >
+                                  {showPassword ? (
+                                    <EyeOff className="h-4 w-4" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </div>
+                              {mode === 'signup' && password.length > 0 ? (
+                                (() => {
+                                  const strength = getPasswordStrength(password)
+                                  return (
+                                    <div
+                                      className="login-password-meter"
+                                      data-score={strength.score}
+                                      aria-live="polite"
+                                      aria-label={`Password strength: ${strength.label}`}
+                                    >
+                                      <div className="login-password-meter-track" aria-hidden>
+                                        <span className="login-password-meter-fill" />
+                                      </div>
+                                      <span className="login-password-meter-label">
+                                        {strength.label}
+                                      </span>
+                                    </div>
+                                  )
+                                })()
+                              ) : null}
                             </label>
+
+                            {mode === 'signup' ? (
+                              <>
+                                <label className="login-chat-auth-field">
+                                  <span>Confirm password</span>
+                                  <div className="login-chat-auth-password-wrap">
+                                    <input
+                                      type={showConfirmPassword ? 'text' : 'password'}
+                                      value={confirmPassword}
+                                      onChange={(e) => setConfirmPassword(e.target.value)}
+                                      onKeyDown={onKeyDown}
+                                      onFocus={() => setInputFocused(true)}
+                                      onBlur={() => setInputFocused(false)}
+                                      placeholder="Re-enter password"
+                                      autoComplete="new-password"
+                                      enterKeyHint="go"
+                                      disabled={sending}
+                                      className="login-chat-auth-input login-chat-auth-input--with-toggle"
+                                    />
+                                    <button
+                                      type="button"
+                                      className="login-chat-auth-visibility"
+                                      onClick={() => setShowConfirmPassword((v) => !v)}
+                                      aria-label={
+                                        showConfirmPassword
+                                          ? 'Hide confirm password'
+                                          : 'Show confirm password'
+                                      }
+                                      tabIndex={-1}
+                                    >
+                                      {showConfirmPassword ? (
+                                        <EyeOff className="h-4 w-4" />
+                                      ) : (
+                                        <Eye className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </label>
+                                {confirmPassword.length > 0 && confirmPassword !== password ? (
+                                  <p className="login-password-mismatch">Passwords don’t match yet.</p>
+                                ) : null}
+                              </>
+                            ) : null}
+
                             {mode === 'login' ? (
                               <button
                                 type="button"
@@ -624,14 +874,30 @@ export function LoginPage() {
                                   setAuthPanel('forgot')
                                   setError(null)
                                   setPassword('')
+                                  setConfirmPassword('')
                                 }}
                               >
                                 Forgot password?
                               </button>
                             ) : null}
+                            {(returningName || email.trim()) && mode === 'login' && authPanel === 'account' ? (
+                              <button
+                                type="button"
+                                className="login-chat-auth-forgot"
+                                onClick={startAsSomeoneElse}
+                              >
+                                {returningName ? `Not ${returningName}? Start fresh` : 'Not you? Start fresh'}
+                              </button>
+                            ) : null}
                             <button
                               type="submit"
-                              disabled={!email.trim() || password.length < 6 || sending}
+                              disabled={
+                                sending ||
+                                !email.trim() ||
+                                (mode === 'signup'
+                                  ? !isStrongPassword(password) || password !== confirmPassword
+                                  : password.length < 1)
+                              }
                               className="login-chat-auth-submit"
                             >
                               {sending

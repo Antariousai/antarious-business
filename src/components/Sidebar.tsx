@@ -62,7 +62,7 @@ export function Sidebar({
         {entitlements.label} plan
       </p>
 
-      <nav className="relative flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+      <nav className="relative flex-1 space-y-1 overflow-y-auto scrollbar-none px-3 pb-4">
         {visibleNav.map((item) => {
           const badge = item.badgeKey ? badges[item.badgeKey] : undefined
           return (

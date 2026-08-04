@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   List,
   Mail,
+  Pencil,
   Phone,
   Plus,
   Search,
@@ -36,20 +37,21 @@ import {
 import { FreyaAvatar } from '../components/FreyaAvatar'
 import { FreyaCreationAssist } from '../components/FreyaCreationAssist'
 import { AddDealModal } from '../components/AddDealModal'
+import { AddFunnelStep } from '../components/AddFunnelStep'
 import { freyaFillCompany, freyaFillContact } from '../lib/freyaCreationHelpers'
 import { DealDetailPanel } from '../components/DealDetailPanel'
 import { useCrm } from '../context/CrmContext'
+import { useFunnelStages } from '../context/FunnelStagesContext'
 import { useApp } from '../context/AppContext'
 import {
   ACTIVITY_LABEL,
-  DEAL_STAGES,
   SEGMENT_LABEL,
   forecastValue,
   formatMoney,
   formatShortDate,
   isOverdue,
-  stageMeta,
   type CrmActivity,
+  type CrmContact,
   type CrmDeal,
   type CrmSegment,
   type DealStage,
@@ -230,9 +232,11 @@ function OverviewTab({
   onOpenActivities: () => void
 }) {
   const { deals, contacts, companies, activities, insights, totals } = useCrm()
+  const { crmStages, crmStageMeta } = useFunnelStages()
+  const openDealStages = crmStages.filter((s) => !s.isClosed)
   const openDeals = deals.filter(
     (d) =>
-      !stageMeta(d.stage).isClosed && (segment === 'all' || d.segment === segment),
+      !crmStageMeta(d.stage).isClosed && (segment === 'all' || d.segment === segment),
   )
   const due = activities.filter(
     (a) => !a.done && (segment === 'all' || a.segment === segment),
@@ -289,15 +293,15 @@ function OverviewTab({
             </button>
           </div>
           <div className="space-y-2.5">
-            {DEAL_STAGES.filter((s) => !s.isClosed).map((stage) => {
-              const stageDeals = openDeals.filter((d) => d.stage === stage.id)
+            {openDealStages.map((stage) => {
+              const stageDeals = openDeals.filter((d) => d.stage === stage.key)
               const value = stageDeals.reduce((s, d) => s + d.value, 0)
-              const max = Math.max(...DEAL_STAGES.filter((x) => !x.isClosed).map((st) => {
-                const v = openDeals.filter((d) => d.stage === st.id).reduce((a, d) => a + d.value, 0)
+              const max = Math.max(...openDealStages.map((st) => {
+                const v = openDeals.filter((d) => d.stage === st.key).reduce((a, d) => a + d.value, 0)
                 return v
               }), 1)
               return (
-                <div key={stage.id}>
+                <div key={stage.key}>
                   <div className="mb-1 flex items-center justify-between text-[12px]">
                     <span className="font-semibold text-ink">{stage.label}</span>
                     <span className="text-muted">
@@ -309,7 +313,7 @@ function OverviewTab({
                       className="h-full rounded-full shadow-sm"
                       style={{
                         width: `${Math.max(4, Math.round((value / max) * 100))}%`,
-                        background: stage.statusColor,
+                        background: stage.color,
                       }}
                     />
                   </div>
@@ -420,6 +424,14 @@ function DealsTab({
   simple?: boolean
 }) {
   const { deals, selectedDealId, selectDeal, moveDeal, updateDeal, totals } = useCrm()
+  const { crmStages, addStage, crmStageMeta } = useFunnelStages()
+  const dealStages = crmStages.map((s) => ({
+    id: s.key,
+    label: s.label,
+    statusColor: s.color,
+    probability: s.probability ?? 0,
+    isClosed: s.isClosed,
+  }))
   const [view, setView] = useState<DealView>('board')
   const [query, setQuery] = useState('')
   const [ownerFilter, setOwnerFilter] = useState<'all' | 'Joy' | 'Freya'>('all')
@@ -432,7 +444,7 @@ function DealsTab({
     return deals.filter((d) => {
       if (segment !== 'all' && d.segment !== segment) return false
       if (!simple && ownerFilter !== 'all' && d.owner !== ownerFilter) return false
-      if (hideClosed && stageMeta(d.stage).isClosed) return false
+      if (hideClosed && crmStageMeta(d.stage).isClosed) return false
       if (query.trim()) {
         const q = query.toLowerCase()
         if (!`${d.title} ${d.company} ${d.contact} ${d.product}`.toLowerCase().includes(q))
@@ -440,20 +452,21 @@ function DealsTab({
       }
       return true
     })
-  }, [deals, segment, ownerFilter, hideClosed, query, simple])
+  }, [deals, segment, ownerFilter, hideClosed, query, simple, crmStageMeta])
 
   const stageTotals = useMemo(() => {
-    const map = Object.fromEntries(
-      DEAL_STAGES.map((s) => [s.id, { count: 0, value: 0 }]),
-    ) as Record<DealStage, { count: number; value: number }>
+    const map: Record<string, { count: number; value: number }> = Object.fromEntries(
+      dealStages.map((s) => [s.id, { count: 0, value: 0 }]),
+    )
     for (const d of filtered) {
+      if (!map[d.stage]) map[d.stage] = { count: 0, value: 0 }
       map[d.stage].count += 1
       map[d.stage].value += d.value
     }
     return map
-  }, [filtered])
+  }, [filtered, dealStages])
 
-  const visibleStages = hideClosed ? DEAL_STAGES.filter((s) => !s.isClosed) : DEAL_STAGES
+  const visibleStages = hideClosed ? dealStages.filter((s) => !s.isClosed) : dealStages
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-20">
@@ -632,6 +645,10 @@ function DealsTab({
               </section>
             )
           })}
+          <AddFunnelStep
+            placeholder="e.g. Deposit paid"
+            onAdd={(label) => addStage('crm', label)}
+          />
         </div>
       )}
 
@@ -679,7 +696,9 @@ function ContactsTab({ segment, simple = false }: { segment: SegmentFilter; simp
   const { contacts, addContact, updateContact } = useCrm()
   const [query, setQuery] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  const [editingContact, setEditingContact] = useState<(typeof contacts)[number] | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [pickToEdit, setPickToEdit] = useState(false)
   const list = contacts.filter((c) => {
     if (segment !== 'all' && c.segment !== segment) return false
     if (!query.trim()) return true
@@ -687,6 +706,32 @@ function ContactsTab({ segment, simple = false }: { segment: SegmentFilter; simp
     return `${c.name} ${c.email} ${c.companyName} ${c.tags.join(' ')}`.toLowerCase().includes(q)
   })
   const selected = contacts.find((c) => c.id === selectedId) || null
+
+  function startEditContacts() {
+    if (selected) {
+      setEditingContact(selected)
+      setPickToEdit(false)
+      return
+    }
+    if (list.length === 1) {
+      setSelectedId(list[0].id)
+      setEditingContact(list[0])
+      setPickToEdit(false)
+      return
+    }
+    setPickToEdit(true)
+  }
+
+  function onPickContact(id: string) {
+    setSelectedId(id)
+    if (pickToEdit) {
+      const contact = contacts.find((c) => c.id === id)
+      if (contact) {
+        setEditingContact(contact)
+        setPickToEdit(false)
+      }
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -701,22 +746,43 @@ function ContactsTab({ segment, simple = false }: { segment: SegmentFilter; simp
               className="h-8 w-56 rounded-md border border-slate-200 pr-3 pl-8 text-[12px] outline-none focus:border-sky"
             />
           </label>
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="ml-auto inline-flex items-center gap-1 rounded-md bg-sky px-3 py-1.5 text-[12px] font-bold text-white"
-          >
-            <Plus className="h-3.5 w-3.5" /> {simple ? 'Add person' : 'Add contact'}
-          </button>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={startEditContacts}
+              className="inline-flex items-center gap-1 rounded-md border border-sky/30 bg-white px-3 py-1.5 text-[12px] font-bold text-sky-bright hover:bg-sky-soft"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit contacts
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-1 rounded-md bg-sky px-3 py-1.5 text-[12px] font-bold text-white"
+            >
+              <Plus className="h-3.5 w-3.5" /> {simple ? 'Add person' : 'Add contact'}
+            </button>
+          </div>
         </div>
+        {pickToEdit && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky/25 bg-sky-soft/60 px-3 py-2 text-[12px] text-sky-bright">
+            <span className="font-semibold">Tap a contact to edit.</span>
+            <button type="button" onClick={() => setPickToEdit(false)} className="font-bold underline underline-offset-2">
+              Cancel
+            </button>
+          </div>
+        )}
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-16">
           {list.map((c) => (
             <button
               key={c.id}
               type="button"
-              onClick={() => setSelectedId(c.id)}
+              onClick={() => onPickContact(c.id)}
               className={`flex w-full items-center gap-3 rounded-xl border bg-white px-3 py-3 text-left shadow-sm ${
-                selectedId === c.id ? 'border-sky ring-2 ring-sky/20' : 'border-slate-100'
+                selectedId === c.id
+                  ? 'border-sky ring-2 ring-sky/20'
+                  : pickToEdit
+                    ? 'border-sky/35 hover:border-sky'
+                    : 'border-slate-100'
               }`}
             >
               <Avatar letter={c.name.charAt(0)} size={40} color={c.color} />
@@ -735,10 +801,7 @@ function ContactsTab({ segment, simple = false }: { segment: SegmentFilter; simp
                 {!simple && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {c.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500"
-                      >
+                      <span key={t} className="rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
                         {t}
                       </span>
                     ))}
@@ -759,13 +822,21 @@ function ContactsTab({ segment, simple = false }: { segment: SegmentFilter; simp
         <aside className="w-full max-w-[360px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white p-5">
           <div className="mb-4 flex items-start gap-3">
             <Avatar letter={selected.name.charAt(0)} size={48} color={selected.color} />
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="text-[18px] font-bold text-ink">{selected.name}</div>
               <div className="text-[12px] text-muted">{selected.title || 'Contact'}</div>
               <div className="mt-1 flex gap-1">
                 <Pill tone={statusTone("segment", selected.segment)}>{SEGMENT_LABEL[selected.segment]}</Pill>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setEditingContact(selected)}
+              className="inline-flex items-center gap-1 rounded-lg border border-sky/25 px-2.5 py-1.5 text-[11px] font-bold text-sky-bright hover:bg-sky-soft"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </button>
           </div>
           <DetailLine icon={Mail} label="Email" value={selected.email} />
           <DetailLine icon={Phone} label="Phone" value={selected.phone || '—'} />
@@ -800,6 +871,16 @@ function ContactsTab({ segment, simple = false }: { segment: SegmentFilter; simp
               setSelectedId(c.id)
               setShowAdd(false)
             })
+          }}
+        />
+      )}
+      {editingContact && (
+        <EditContactModal
+          contact={editingContact}
+          onClose={() => setEditingContact(null)}
+          onSave={(patch) => {
+            updateContact(editingContact.id, patch)
+            setEditingContact(null)
           }}
         />
       )}
@@ -1097,13 +1178,20 @@ function DealTableGroup({
   onMove,
   onUpdate,
 }: {
-  stage: (typeof DEAL_STAGES)[number]
+  stage: {
+    id: string
+    label: string
+    statusColor: string
+    probability: number
+    isClosed?: boolean
+  }
   deals: CrmDeal[]
   total: number
   onOpen: (id: string) => void
   onMove: (id: string, stage: DealStage) => void
   onUpdate: (id: string, patch: Partial<CrmDeal>) => void
 }) {
+  const { crmStages, crmStageMeta } = useFunnelStages()
   return (
     <>
       <tr>
@@ -1131,10 +1219,10 @@ function DealTableGroup({
               value={deal.stage}
               onChange={(e) => onMove(deal.id, e.target.value as DealStage)}
               className="rounded px-2 py-1 text-[11px] font-bold text-white outline-none"
-              style={{ background: stageMeta(deal.stage).statusColor }}
+              style={{ background: crmStageMeta(deal.stage).color }}
             >
-              {DEAL_STAGES.map((s) => (
-                <option key={s.id} value={s.id} className="bg-white text-ink">{s.label}</option>
+              {crmStages.map((s) => (
+                <option key={s.key} value={s.key} className="bg-white text-ink">{s.label}</option>
               ))}
             </select>
           </td>
@@ -1341,6 +1429,58 @@ function AddContactModal({
         )}
         <button type="submit" disabled={!canSubmit || applying} className="h-11 w-full rounded-lg bg-sky font-bold text-white disabled:bg-sky-muted">
           {leaveToFreya ? 'Let Freya add contact' : 'Save contact'}
+        </button>
+      </form>
+    </Modal>
+  )
+}
+
+function EditContactModal({
+  contact,
+  onClose,
+  onSave,
+}: {
+  contact: CrmContact
+  onClose: () => void
+  onSave: (patch: Partial<CrmContact>) => void
+}) {
+  const [name, setName] = useState(contact.name)
+  const [email, setEmail] = useState(contact.email)
+  const [phone, setPhone] = useState(contact.phone || '')
+  const [title, setTitle] = useState(contact.title || '')
+  const [companyName, setCompanyName] = useState(contact.companyName || '')
+  const [segment, setSegment] = useState<CrmSegment>(contact.segment)
+  const [notes, setNotes] = useState(contact.notes || '')
+  const [nextStep, setNextStep] = useState(contact.nextStep || '')
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) return
+    onSave({
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      title: title.trim(),
+      companyName: companyName.trim() || '—',
+      segment,
+      notes: notes.trim(),
+      nextStep: nextStep.trim(),
+    })
+  }
+
+  return (
+    <Modal title="Edit contact" onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        <SegToggle value={segment} onChange={setSegment} />
+        <FieldInput label="Full name" value={name} onChange={setName} required />
+        <FieldInput label="Email" value={email} onChange={setEmail} />
+        <FieldInput label="Phone" value={phone} onChange={setPhone} />
+        <FieldInput label="Title / role" value={title} onChange={setTitle} />
+        {segment === 'b2b' && <FieldInput label="Company" value={companyName} onChange={setCompanyName} />}
+        <FieldInput label="Next step" value={nextStep} onChange={setNextStep} />
+        <FieldInput label="Notes" value={notes} onChange={setNotes} />
+        <button type="submit" disabled={!name.trim()} className="h-11 w-full rounded-lg bg-sky font-bold text-white disabled:bg-sky-muted">
+          Save changes
         </button>
       </form>
     </Modal>

@@ -73,6 +73,7 @@ interface StoredState {
 }
 
 type MeResponse = {
+  organizationId?: string
   profile: BusinessProfile
   onboarded: boolean
   prefs: FreyaPrefs
@@ -142,6 +143,8 @@ interface AppContextValue {
   onboarded: boolean
   prefs: FreyaPrefs
   billing: BillingDemo
+  /** Supabase org id when hydrated from backend; null in local demo mode. */
+  organizationId: string | null
   planTier: PlanTier
   entitlements: PlanEntitlements
   seatLimit: number
@@ -176,6 +179,7 @@ const AppContext = createContext<AppContextValue | null>(null)
 export function AppProvider({ children }: { children: ReactNode }) {
   const { backend, ready: backendReady, envConfigured } = useBackendMode()
   const [profile, setProfile] = useState<BusinessProfile | null>(null)
+  const [organizationId, setOrganizationId] = useState<string | null>(null)
   const [onboarded, setOnboarded] = useState(false)
   const [prefs, setPrefs] = useState<FreyaPrefs>({ ...DEFAULT_PREFS })
   const [billing, setBilling] = useState<BillingDemo>({ ...DEFAULT_BILLING })
@@ -189,6 +193,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       platforms: (me.profile.platforms ?? []).map((p) => asPlatform(p)),
     })
     setProfile(nextProfile)
+    setOrganizationId(me.organizationId ?? null)
     setOnboarded(me.onboarded)
     setPrefs({
       ...DEFAULT_PREFS,
@@ -215,6 +220,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return me
     } catch {
       setProfile(null)
+      setOrganizationId(null)
       setOnboarded(false)
       setPrefs({ ...DEFAULT_PREFS })
       setBilling({ ...DEFAULT_BILLING })
@@ -230,6 +236,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (envConfigured) {
         // Env present but no session — stay logged out (don't revive demo storage).
         setProfile(null)
+        setOrganizationId(null)
         setOnboarded(false)
         setPrefs({ ...DEFAULT_PREFS })
         setBilling({ ...DEFAULT_BILLING })
@@ -342,6 +349,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearAntariousStorage()
     setProfile(null)
+    setOrganizationId(null)
     setOnboarded(false)
     setPrefs({ ...DEFAULT_PREFS })
     setBilling({ ...DEFAULT_BILLING })
@@ -580,6 +588,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       profile,
+      organizationId,
       onboarded,
       prefs,
       billing,
@@ -611,6 +620,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       profile,
+      organizationId,
       onboarded,
       prefs,
       billing,

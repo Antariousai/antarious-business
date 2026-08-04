@@ -148,10 +148,12 @@ export function OnboardingPage() {
 
   async function freyaSay(first: string, nextStep: Step, second?: string) {
     setBusy(true)
-    setTyping(true)
-    await wait(700 + Math.min(first.length * 8, 900))
-    setTyping(false)
-    setMessages((prev) => [...prev, { id: uid(), role: 'freya', text: first }])
+    if (first.trim()) {
+      setTyping(true)
+      await wait(700 + Math.min(first.length * 8, 900))
+      setTyping(false)
+      setMessages((prev) => [...prev, { id: uid(), role: 'freya', text: first }])
+    }
     if (second) {
       setTyping(true)
       await wait(550)
@@ -162,20 +164,139 @@ export function OnboardingPage() {
     setBusy(false)
   }
 
+  async function askNext(nextStep: Step, prompt: string) {
+    setBusy(true)
+    setTyping(true)
+    await wait(500)
+    setTyping(false)
+    setMessages((prev) => [...prev, { id: uid(), role: 'freya', text: prompt }])
+    setStep(nextStep)
+    setBusy(false)
+  }
+
   function pushUser(text: string) {
     setMessages((prev) => [...prev, { id: uid(), role: 'user', text }])
+  }
+
+  type TurnResult = {
+    reply: string
+    extracted: {
+      businessName?: string | null
+      industry?: string | null
+      businessType?: string | null
+      customers?: string | null
+      audienceServe?: 'customers' | 'clients' | 'both' | null
+    }
+    isCorrection?: boolean
+    correctField?: 'businessName' | 'industry' | 'customers' | 'none'
+  }
+
+  async function interpretTurn(
+    turnStep: 'business' | 'industry' | 'customers' | 'correction',
+    message: string,
+  ): Promise<TurnResult> {
+    try {
+      const res = await fetch('/api/onboarding/turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          step: turnStep,
+          message,
+          context: {
+            ownerName: owner,
+            businessName,
+            industry,
+            customers,
+          },
+        }),
+      })
+      if (!res.ok) throw new Error('turn failed')
+      const data = (await res.json()) as TurnResult & { ok?: boolean }
+      return {
+        reply: data.reply,
+        extracted: data.extracted ?? {},
+        isCorrection: data.isCorrection,
+        correctField: data.correctField,
+      }
+    } catch {
+      return {
+        reply:
+          turnStep === 'business'
+            ? `${message} — love that already 💛`
+            : turnStep === 'industry'
+              ? `Got it — ${message}. I’ll speak your language.`
+              : turnStep === 'correction'
+                ? `Got it — I’ll note that.`
+                : 'Those are great people to show up for.',
+        extracted: {
+          businessName: turnStep === 'business' ? message : null,
+          industry: turnStep === 'industry' ? message : null,
+          customers: turnStep === 'customers' ? message : null,
+        },
+        isCorrection: turnStep === 'correction',
+        correctField: 'none',
+      }
+    }
+  }
+
+  function applyExtracted(extracted: TurnResult['extracted'], correctField?: TurnResult['correctField']) {
+    if (extracted.businessName || correctField === 'businessName') {
+      if (extracted.businessName) setBusinessName(extracted.businessName)
+    }
+    if (extracted.industry || correctField === 'industry') {
+      if (extracted.industry) setIndustry(extracted.industry)
+    }
+    if (extracted.businessType) {
+      // free-text type label — store as industry hint already; keep chip only if matches
+    }
+    if (extracted.customers || correctField === 'customers') {
+      if (extracted.customers) setCustomers(extracted.customers)
+    }
+    if (extracted.audienceServe) setAudienceServe(extracted.audienceServe)
+    if (extracted.businessType) {
+      const chip = BUSINESS_TYPE_CHIPS.find(
+        (c) => c.label.toLowerCase() === extracted.businessType!.toLowerCase(),
+      )
+      if (chip) setBusinessType(chip.id)
+    }
   }
 
   async function handleTextSubmit(raw: string) {
     const trimmed = raw.trim()
     if (!trimmed || busy || typing) return
 
+    const onChipStep = step === 'goals' || step === 'team' || step === 'platforms'
+    const turnStep =
+      onChipStep || trimmed.toLowerCase().match(/^(actually|wait|sorry|i meant|change|fix|update)\b/)
+        ? ('correction' as const)
+        : step === 'business' || step === 'industry' || step === 'customers'
+          ? step
+          : ('correction' as const)
+
+    if (turnStep !== 'correction' && step !== turnStep) return
+
+    setInput('')
+    pushUser(trimmed)
+    setBusy(true)
+    setTyping(true)
+
+    const turn = await interpretTurn(turnStep, trimmed)
+    applyExtracted(turn.extracted, turn.correctField)
+
+    if (turn.isCorrection || turnStep === 'correction') {
+      setTyping(false)
+      setMessages((prev) => [...prev, { id: uid(), role: 'freya', text: turn.reply }])
+      setBusy(false)
+      return
+    }
+
+    setTyping(false)
+    setMessages((prev) => [...prev, { id: uid(), role: 'freya', text: turn.reply }])
+
     if (step === 'business') {
-      setBusinessName(trimmed)
-      setInput('')
-      pushUser(trimmed)
-      await freyaSay(
-        `${trimmed} — love that already 💛`,
+      const name = turn.extracted.businessName?.trim() || trimmed
+      setBusinessName(name)
+      await askNext(
         'industry',
         `What kind of business is it? Tap a type below, or type your own.`,
       )
@@ -183,11 +304,9 @@ export function OnboardingPage() {
     }
 
     if (step === 'industry') {
-      setIndustry(trimmed)
-      setInput('')
-      pushUser(trimmed)
-      await freyaSay(
-        `Got it — ${trimmed}. I'll speak your language.`,
+      const ind = turn.extracted.industry?.trim() || trimmed
+      setIndustry(ind)
+      await askNext(
         'customers',
         `Who do you serve most — customers, clients, or both? Tap one, or type a quick picture of them.`,
       )
@@ -195,15 +314,13 @@ export function OnboardingPage() {
     }
 
     if (step === 'customers') {
-      setCustomers(trimmed)
-      if (!audienceServe) {
-        const inferred = audienceWord(trimmed, industry)
+      const who = turn.extracted.customers?.trim() || trimmed
+      setCustomers(who)
+      if (!audienceServe && !turn.extracted.audienceServe) {
+        const inferred = audienceWord(who, industry)
         setAudienceServe(inferred === 'clients' ? 'clients' : 'customers')
       }
-      setInput('')
-      pushUser(trimmed)
-      await freyaSay(
-        `Those are great people to show up for.`,
+      await askNext(
         'goals',
         `What do you want most help with right now? Tap as many as you like — then hit "That's me".`,
       )
@@ -316,11 +433,20 @@ export function OnboardingPage() {
     navigate('/app')
   }
 
-  const showComposer = step === 'business' || step === 'industry' || step === 'customers'
+  const showComposer =
+    step === 'business' ||
+    step === 'industry' ||
+    step === 'customers' ||
+    step === 'goals' ||
+    step === 'team' ||
+    step === 'platforms'
   const placeholders: Partial<Record<Step, string>> = {
     business: "e.g. Nusrat's Boutique",
     industry: 'e.g. Boutique / garments',
     customers: 'e.g. Local families who love weekend treats',
+    goals: 'Or type a fix — e.g. “actually my shop is…”',
+    team: 'Or correct an earlier answer…',
+    platforms: 'Or correct an earlier answer…',
   }
 
   return (
@@ -546,14 +672,14 @@ export function OnboardingPage() {
             </div>
           </form>
           <p className="mt-3 text-center text-[11px] text-slate-400">
-            Enter to send · Shift+Enter for a new line · Demo data stays on your device
+            Enter to send · Freya cleans up typos · You can fix answers later in chat too
           </p>
         </div>
       )}
 
       {!showComposer && step !== 'done' && (
         <p className="relative z-10 pb-6 text-center text-[11px] text-slate-400">
-          Demo only — you can change anything later in Settings
+          You can change anything later by asking Freya in the app
         </p>
       )}
     </div>

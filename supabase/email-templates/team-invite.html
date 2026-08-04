@@ -1,0 +1,38 @@
+{{/*
+  Antarious / Freya — Team invitation (Resend)
+  Sent by POST /api/team/invites via src/lib/email/sendTeamInvite.ts
+  Keep in sync with buildTeamInviteHtml() for branding reference.
+  Subject: {inviter} invited you to {business} on Antarious
+*/}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>You’re invited</title>
+</head>
+<body style="margin:0;padding:0;background:#eef6fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef6fb;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#0b131e 0%,#0e7490 55%,#0ea5e9 100%);padding:28px;">
+              <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;">You’re invited</h1>
+              <p style="margin:8px 0 0;font-size:14px;color:rgba(255,255,255,0.85);">Join the workspace and meet Freya.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px;">
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
+                Someone on your team invited you to collaborate on Antarious. Accept with the same email this message was sent to (work or personal).
+              </p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;">Runtime HTML is built in <code>src/lib/email/sendTeamInvite.ts</code>.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

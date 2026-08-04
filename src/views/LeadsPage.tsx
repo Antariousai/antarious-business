@@ -1,57 +1,52 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { LayoutGrid, List, Plus, Trash2, ArrowRight, Users, Sparkles } from 'lucide-react'
+import { LayoutGrid, List, Plus, Trash2, ArrowRight, Users, Sparkles, Pencil } from 'lucide-react'
 import { AddLeadModal, EditLeadModal } from '../components/AddLeadModal'
+import { AddFunnelStep } from '../components/AddFunnelStep'
 import { PageHero } from '../components/PageHero'
 import { LeadContactRow, LeadKanbanCard } from '../components/LeadCards'
 import { useLeads } from '../context/LeadsContext'
-import { LEAD_STAGES, type Lead, type LeadStage } from '../data/leadsData'
+import { useFunnelStages } from '../context/FunnelStagesContext'
+import { stageColumnChrome } from '../data/funnelStages'
+import type { Lead, LeadStage } from '../data/leadsData'
 
 type Tab = 'board' | 'contacts'
 
-const STAGE_COLUMN: Record<
-  LeadStage,
-  { bg: string; over: string; header: string; count: string }
-> = {
-  new: {
-    bg: 'bg-gradient-to-b from-sky-soft/90 via-sky-soft/40 to-white/60',
-    over: 'ring-2 ring-sky shadow-lg shadow-sky/20',
-    header: 'from-sky-bright/15 to-transparent',
-    count: 'bg-sky text-white shadow-sm shadow-sky/30',
-  },
-  contacted: {
-    bg: 'bg-gradient-to-b from-peach/40 via-amber-50/50 to-white/60',
-    over: 'ring-2 ring-sunshine shadow-lg shadow-amber-200/40',
-    header: 'from-sunshine/20 to-transparent',
-    count: 'bg-gradient-to-r from-sunshine to-peach text-navy-deep shadow-sm shadow-amber-200/50',
-  },
-  qualified: {
-    bg: 'bg-gradient-to-b from-sky-soft/70 via-sky-soft/30 to-white/60',
-    over: 'ring-2 ring-sky/25 shadow-lg shadow-sky/40',
-    header: 'from-sky/15 to-transparent',
-    count: 'bg-gradient-to-r from-sky-bright to-sky-bright text-white shadow-sm shadow-sky/40',
-  },
-  converted: {
-    bg: 'bg-gradient-to-b from-mint/25 via-emerald-50/40 to-white/60',
-    over: 'ring-2 ring-mint shadow-lg shadow-emerald-200/40',
-    header: 'from-mint/20 to-transparent',
-    count: 'bg-gradient-to-r from-mint to-emerald-500 text-white shadow-sm shadow-emerald-300/40',
-  },
-}
-
 export function LeadsPage() {
   const { leads, selectedIds, moveLead, moveSelected, clearSelection, removeLeads } = useLeads()
+  const { leadStages, addStage } = useFunnelStages()
   const [tab, setTab] = useState<Tab>('board')
   const [showAdd, setShowAdd] = useState(false)
   const [editingLead, setEditingLead] = useState<Lead | null>(null)
   const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [overStage, setOverStage] = useState<LeadStage | null>(null)
+  const [pickToEdit, setPickToEdit] = useState(false)
 
   const hotCount = leads.filter((l) => l.temp === 'hot').length
 
   function toggleExpand(id: string) {
     setExpandedLeadId((cur) => (cur === id ? null : id))
+  }
+
+  function startEditContacts() {
+    setTab('contacts')
+    setExpandedLeadId(null)
+    if (leads.length === 1) {
+      setEditingLead(leads[0])
+      setPickToEdit(false)
+      return
+    }
+    setPickToEdit(true)
+  }
+
+  function onContactActivate(lead: Lead) {
+    if (pickToEdit) {
+      setEditingLead(lead)
+      setPickToEdit(false)
+      return
+    }
+    toggleExpand(lead.id)
   }
 
   return (
@@ -69,14 +64,24 @@ export function LeadsPage() {
           </>
         }
         action={
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-white px-5 py-2.5 text-[14px] font-bold text-emerald-700 shadow-sm hover:bg-emerald-50"
-          >
-            <Plus className="h-4 w-4" strokeWidth={3} />
-            Add person
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={startEditContacts}
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/40 bg-white/15 px-4 py-2.5 text-[14px] font-bold text-white hover:bg-white/25"
+            >
+              <Pencil className="h-4 w-4" strokeWidth={2.5} />
+              Edit contacts
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white px-5 py-2.5 text-[14px] font-bold text-emerald-700 shadow-sm hover:bg-emerald-50"
+            >
+              <Plus className="h-4 w-4" strokeWidth={3} />
+              Add person
+            </button>
+          </div>
         }
       />
 
@@ -109,6 +114,7 @@ export function LeadsPage() {
               onClick={() => {
                 setTab(t.id)
                 setExpandedLeadId(null)
+                if (t.id !== 'contacts') setPickToEdit(false)
               }}
               className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[13px] font-semibold transition ${
                 tab === t.id
@@ -127,11 +133,11 @@ export function LeadsPage() {
             <span className="rounded-full bg-navy-deep px-2 py-0.5 text-[11px] font-bold text-white">
               {selectedIds.size} selected
             </span>
-            {LEAD_STAGES.map((s) => (
+            {leadStages.map((s) => (
               <button
-                key={s.id}
+                key={s.key}
                 type="button"
-                onClick={() => moveSelected(s.id)}
+                onClick={() => moveSelected(s.key)}
                 className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold text-white shadow-sm"
                 style={{ background: s.color }}
               >
@@ -160,22 +166,22 @@ export function LeadsPage() {
 
       {tab === 'board' && (
         <div className="kanban-board flex items-stretch gap-3 overflow-x-auto pb-2">
-          {LEAD_STAGES.map((stage) => {
-            const columnLeads = leads.filter((l) => l.stage === stage.id)
-            const col = STAGE_COLUMN[stage.id]
-            const isOver = overStage === stage.id
+          {leadStages.map((stage, index) => {
+            const columnLeads = leads.filter((l) => l.stage === stage.key)
+            const col = stageColumnChrome(index)
+            const isOver = overStage === stage.key
             return (
               <section
-                key={stage.id}
+                key={stage.key}
                 onDragOver={(e) => {
                   e.preventDefault()
                   e.dataTransfer.dropEffect = 'move'
-                  if (overStage !== stage.id) setOverStage(stage.id)
+                  if (overStage !== stage.key) setOverStage(stage.key)
                 }}
                 onDragLeave={(e) => {
                   const next = e.relatedTarget as Node | null
                   if (next && e.currentTarget.contains(next)) return
-                  setOverStage((cur) => (cur === stage.id ? null : cur))
+                  setOverStage((cur) => (cur === stage.key ? null : cur))
                 }}
                 onDrop={(e) => {
                   e.preventDefault()
@@ -183,7 +189,7 @@ export function LeadsPage() {
                     e.dataTransfer.getData('text/lead-id') ||
                     e.dataTransfer.getData('text/plain') ||
                     draggingId
-                  if (id) moveLead(id, stage.id)
+                  if (id) moveLead(id, stage.key)
                   setDraggingId(null)
                   setOverStage(null)
                 }}
@@ -234,18 +240,38 @@ export function LeadsPage() {
               </section>
             )
           })}
+          <AddFunnelStep
+            placeholder="e.g. Visited shop"
+            onAdd={(label) => addStage('leads', label)}
+          />
         </div>
       )}
 
       {tab === 'contacts' && (
         <div className="space-y-2.5">
+          {pickToEdit && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky/25 bg-sky-soft/60 px-4 py-2.5 text-[13px] text-sky-bright">
+              <span className="font-semibold">Tap a person to edit their contact details.</span>
+              <button
+                type="button"
+                onClick={() => setPickToEdit(false)}
+                className="text-[12px] font-bold text-sky-bright/80 underline underline-offset-2 hover:text-sky-bright"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           {leads.map((lead) => (
             <LeadContactRow
               key={lead.id}
               lead={lead}
-              expanded={expandedLeadId === lead.id}
-              onToggleExpand={() => toggleExpand(lead.id)}
-              onEdit={() => setEditingLead(lead)}
+              expanded={!pickToEdit && expandedLeadId === lead.id}
+              highlightPick={pickToEdit}
+              onToggleExpand={() => onContactActivate(lead)}
+              onEdit={() => {
+                setEditingLead(lead)
+                setPickToEdit(false)
+              }}
             />
           ))}
           {!leads.length && (
@@ -258,7 +284,7 @@ export function LeadsPage() {
               <button
                 type="button"
                 onClick={() => setShowAdd(true)}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-sky to-sky-bright px-4 py-2 text-[13px] font-bold text-white shadow-sm shadow-sky/30"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-sky px-4 py-2 text-[13px] font-bold text-white shadow-sm shadow-sky/30"
               >
                 <Plus className="h-4 w-4" />
                 Add your first lead

@@ -1,36 +1,32 @@
+import { DEFAULT_CRM_STAGES } from './funnelStages'
+
 export type CrmSegment = 'b2b' | 'b2c'
-export type DealStage =
-  | 'qualified'
-  | 'meeting'
-  | 'proposal'
-  | 'negotiation'
-  | 'won'
-  | 'lost'
+export type DealStage = string
 export type DealPriority = 'high' | 'medium' | 'low'
 export type ContactStatus = 'active' | 'lead' | 'customer' | 'churned'
 export type ActivityType = 'task' | 'call' | 'email' | 'meeting' | 'note'
 export type InsightTone = 'action' | 'risk' | 'win' | 'info'
 
+/** Default catalog — prefer `useFunnelStages().crmStages` for org-custom steps. */
 export const DEAL_STAGES: {
   id: DealStage
   label: string
   statusColor: string
   probability: number
   isClosed?: boolean
-}[] = [
-  { id: 'qualified', label: 'New', statusColor: '#579bfc', probability: 20 },
-  { id: 'meeting', label: 'Talking', statusColor: '#38bdf8', probability: 40 },
-  { id: 'proposal', label: 'Quote sent', statusColor: '#fdab3d', probability: 60 },
-  { id: 'negotiation', label: 'Almost there', statusColor: '#ff642e', probability: 80 },
-  { id: 'won', label: 'Won', statusColor: '#00c875', probability: 100, isClosed: true },
-  { id: 'lost', label: 'Lost', statusColor: '#c4c4c4', probability: 0, isClosed: true },
-]
+}[] = DEFAULT_CRM_STAGES.map((s) => ({
+  id: s.key,
+  label: s.label,
+  statusColor: s.color,
+  probability: s.probability ?? 0,
+  isClosed: s.isClosed,
+}))
 
 export function stageMeta(id: string) {
   return DEAL_STAGES.find((s) => s.id === id) ?? DEAL_STAGES[0]
 }
 
-const STAGE_ALIASES: Record<string, DealStage> = {
+const STAGE_ALIASES: Record<string, string> = {
   discovery: 'qualified',
   presentation: 'proposal',
   'closed-won': 'won',
@@ -38,9 +34,10 @@ const STAGE_ALIASES: Record<string, DealStage> = {
 }
 
 export function normalizeStage(raw: string): DealStage {
-  if (DEAL_STAGES.some((s) => s.id === raw)) return raw as DealStage
-  return STAGE_ALIASES[raw] || 'qualified'
+  if (DEAL_STAGES.some((s) => s.id === raw)) return raw
+  return STAGE_ALIASES[raw] || raw || 'qualified'
 }
+
 
 export interface CrmContact {
   id: string

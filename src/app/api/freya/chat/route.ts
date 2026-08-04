@@ -67,7 +67,9 @@ export async function POST(req: Request) {
     ] = await Promise.all([
       supabase
         .from('business_profiles')
-        .select('business_name, industry, customers')
+        .select(
+          'business_name, industry, customers, business_type, audience_serve, team_size',
+        )
         .eq('organization_id', ctx.organizationId)
         .maybeSingle(),
       supabase

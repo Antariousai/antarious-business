@@ -10,5 +10,6 @@ export {
   moneyAssistantTools,
   campaignPlannerTools,
 } from './specialists'
+export { profileEditorTools } from './profileTools'
 export { discoverAgentTools } from './discoverAgent'
 export { chargeAgentRun, recordUsageTokens } from './usage'

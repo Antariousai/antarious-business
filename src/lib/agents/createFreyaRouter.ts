@@ -16,6 +16,6 @@ export function createFreyaRouterAgent(
     id: 'freya-router',
     model: resolveModel(),
     instructions: freyaSystemPrompt(opts.snapshot),
-    tools: freyaRouterTools(supabase, opts.organizationId, opts.userId),
+    tools: freyaRouterTools(supabase, opts.organizationId, opts.userId, opts.snapshot.planTier),
   })
 }

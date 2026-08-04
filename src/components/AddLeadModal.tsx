@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
 import { useApp } from '../context/AppContext'
 import { useLeads } from '../context/LeadsContext'
+import { useFunnelStages } from '../context/FunnelStagesContext'
 import { freyaFillLead, type FreyaBizContext } from '../lib/freyaCreationHelpers'
 import type { Lead, LeadPlatform, LeadSource, LeadTemp } from '../data/leadsData'
 
@@ -197,6 +198,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
 
 export function EditLeadModal({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const { updateLead, removeLeads } = useLeads()
+  const { leadStages } = useFunnelStages()
   const [name, setName] = useState(lead.name)
   const [email, setEmail] = useState(lead.email)
   const [company, setCompany] = useState(lead.company === '—' ? '' : lead.company)
@@ -291,10 +293,11 @@ export function EditLeadModal({ lead, onClose }: { lead: Lead; onClose: () => vo
                 onChange={(e) => setStage(e.target.value as Lead['stage'])}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
               >
-                <option value="new">New</option>
-                <option value="contacted">Contacted</option>
-                <option value="qualified">Qualified</option>
-                <option value="converted">Converted</option>
+                {leadStages.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>

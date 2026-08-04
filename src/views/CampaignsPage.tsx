@@ -260,7 +260,7 @@ export function CampaignsPage() {
                     </button>
                     <Link
                       to={`/app/campaigns/${c.id}`}
-                      className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-bright to-sky-bright px-3.5 py-1.5 text-[12px] font-bold text-white shadow-sm shadow-sky/40 hover:brightness-110"
+                      className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-bright to-sky px-3.5 py-1.5 text-[12px] font-bold text-white shadow-sm shadow-sky/30 hover:brightness-105"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
                       Insights

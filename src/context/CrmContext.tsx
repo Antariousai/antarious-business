@@ -15,7 +15,6 @@ import {
   SEED_DEALS,
   SEED_INSIGHTS,
   normalizeStage,
-  stageMeta,
   type CrmActivity,
   type CrmCompany,
   type CrmContact,
@@ -34,6 +33,7 @@ import {
   mapApiCrmInsight,
 } from '@/lib/backend/mappers'
 import { useBackendMode } from '@/lib/backend/BackendModeContext'
+import { useFunnelStages } from '@/context/FunnelStagesContext'
 
 const STORAGE_KEY = 'antarious-crm-v2-bd'
 
@@ -151,6 +151,7 @@ const CrmContext = createContext<CrmContextValue | null>(null)
 
 export function CrmProvider({ children }: { children: ReactNode }) {
   const { backend, ready } = useBackendMode()
+  const { crmStageMeta } = useFunnelStages()
   const [deals, setDeals] = useState<CrmDeal[]>([])
   const [contacts, setContacts] = useState<CrmContact[]>([])
   const [companies, setCompanies] = useState<CrmCompany[]>([])
@@ -232,7 +233,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
 
   const moveDeal = useCallback(
     (id: string, stage: DealStage) => {
-      const meta = stageMeta(stage)
+      const meta = crmStageMeta(stage)
       if (backend) {
         void apiFetch('/api/crm', {
           method: 'PATCH',
@@ -251,7 +252,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
         ),
       })
     },
-    [backend, deals, persist, refresh],
+    [backend, deals, persist, refresh, crmStageMeta],
   )
 
   const addDeal = useCallback(
@@ -401,13 +402,13 @@ export function CrmProvider({ children }: { children: ReactNode }) {
 
   const updateContact = useCallback(
     (id: string, patch: Partial<CrmContact>) => {
+      setContacts((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)))
       if (backend) {
         const body: Record<string, unknown> = { resource: 'contacts', id }
         if (patch.name != null) body.name = patch.name
         if (patch.email != null) body.email = patch.email
         if (patch.phone != null) body.phone = patch.phone
         if (patch.title != null) body.role = patch.title
-        // Non-optimistic: wait for the write, then re-sync from server.
         void apiFetch('/api/crm', { method: 'PATCH', body: JSON.stringify(body) }).then(() =>
           refresh(),
         )
@@ -534,13 +535,15 @@ export function CrmProvider({ children }: { children: ReactNode }) {
   )
 
   const totals = useMemo(() => {
-    const open = deals.filter((d) => !stageMeta(d.stage).isClosed)
+    const open = deals.filter((d) => !crmStageMeta(d.stage).isClosed)
     const openValue = open.reduce((s, d) => s + d.value, 0)
     const forecast = open.reduce(
-      (s, d) => s + d.value * (stageMeta(d.stage).probability / 100),
+      (s, d) => s + d.value * ((crmStageMeta(d.stage).probability ?? 0) / 100),
       0,
     )
-    const won = deals.filter((d) => d.stage === 'won').reduce((s, d) => s + d.value, 0)
+    const won = deals
+      .filter((d) => d.stage === 'won' || crmStageMeta(d.stage).label.toLowerCase() === 'won')
+      .reduce((s, d) => s + d.value, 0)
     return {
       openValue,
       forecast: Math.round(forecast),
@@ -552,7 +555,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       companies: companies.length,
       tasksDue: activities.filter((a) => !a.done).length,
     }
-  }, [deals, contacts, companies, activities])
+  }, [deals, contacts, companies, activities, crmStageMeta])
 
   const value = useMemo(
     () => ({

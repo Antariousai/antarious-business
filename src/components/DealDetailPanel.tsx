@@ -2,8 +2,8 @@ import { type ReactNode } from 'react'
 import { Building2, Calendar, Mail, Phone, User, X } from 'lucide-react'
 import { Avatar } from './Avatar'
 import { usePipeline } from '../context/PipelineContext'
+import { useFunnelStages } from '../context/FunnelStagesContext'
 import {
-  DEAL_STAGES,
   forecastValue,
   formatMoney,
   formatShortDate,
@@ -13,7 +13,8 @@ import {
 
 export function DealDetailPanel({ deal }: { deal: Deal }) {
   const { selectDeal, updateDeal, moveDeal, removeDeal } = usePipeline()
-  const meta = DEAL_STAGES.find((s) => s.id === deal.stage)!
+  const { crmStages, crmStageMeta } = useFunnelStages()
+  const meta = crmStageMeta(deal.stage)
 
   return (
     <aside className="flex h-full w-full max-w-[400px] shrink-0 flex-col border-l border-slate-200 bg-white shadow-xl">
@@ -41,7 +42,7 @@ export function DealDetailPanel({ deal }: { deal: Deal }) {
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-[28px] font-bold text-ink">{formatMoney(deal.value)}</span>
             <span className="text-[12px] text-muted">
-              Forecast {formatMoney(forecastValue(deal))} ({meta.probability}%)
+              Forecast {formatMoney(forecastValue(deal))} ({meta.probability ?? 0}%)
             </span>
           </div>
           <input
@@ -55,16 +56,16 @@ export function DealDetailPanel({ deal }: { deal: Deal }) {
 
         <Field label="Deal stage">
           <div className="flex flex-wrap gap-1.5">
-            {DEAL_STAGES.map((s) => (
+            {crmStages.map((s) => (
               <button
-                key={s.id}
+                key={s.key}
                 type="button"
-                onClick={() => moveDeal(deal.id, s.id)}
+                onClick={() => moveDeal(deal.id, s.key)}
                 className="rounded-md px-2.5 py-1 text-[11px] font-bold text-white transition"
                 style={{
-                  background: s.statusColor,
-                  opacity: deal.stage === s.id ? 1 : 0.45,
-                  outline: deal.stage === s.id ? '2px solid #0f172a33' : undefined,
+                  background: s.color,
+                  opacity: deal.stage === s.key ? 1 : 0.45,
+                  outline: deal.stage === s.key ? '2px solid #0f172a33' : undefined,
                 }}
               >
                 {s.label}
