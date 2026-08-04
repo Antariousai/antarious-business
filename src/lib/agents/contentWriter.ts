@@ -10,7 +10,7 @@ export function contentWriterTools(
   return {
     draft_caption: tool({
       description:
-        'Draft a mid-length social caption (2–4 short sentences) aligned to this org’s industry, customers, and goals. Do not use a generic boutique template.',
+        'Optional helper to sketch a caption idea. Prefer writing the final caption yourself in create_post_draft.caption (2–4 short sentences, on-brand for this business).',
       inputSchema: z.object({
         offer: z.string().describe('What is being promoted'),
         tone: z.enum(['warm', 'professional', 'playful']).optional(),
@@ -21,7 +21,7 @@ export function contentWriterTools(
           offer.trim(),
           '',
           platform === 'Instagram'
-            ? 'Save this post and message us when you’re ready — happy to help you choose.'
+            ? 'Save this and message us when you’re ready — happy to help you choose.'
             : 'Message us with what you need. We’ll reply with clear next steps.',
           tone === 'professional' ? 'Limited availability this week.' : 'We’re here when you are.',
         ].join('\n')
@@ -59,50 +59,74 @@ export function contentWriterTools(
     }),
 
     create_post_draft: tool({
-      description: 'Create a draft content post in the org (needs human publish).',
+      description:
+        'Save a draft post to Posts → Drafts for this business. Write a complete mid-length caption yourself (2–4 short sentences) using the business industry/customers/goals. Always call this when the owner asks you to draft a post. Returns postId so they can open it.',
       inputSchema: z.object({
-        caption: z.string(),
+        caption: z
+          .string()
+          .min(12)
+          .describe('Full post caption Freya wrote — ready for the owner to review'),
         title: z.string().optional(),
-        platforms: z.array(z.string()).optional(),
+        platforms: z
+          .array(z.string())
+          .optional()
+          .describe('e.g. Facebook, Instagram — defaults if omitted'),
         tag: z.string().optional(),
-        scheduled_at: z.string().optional(),
       }),
-      execute: async ({ caption, title, platforms, tag, scheduled_at }) => {
+      execute: async ({ caption, title, platforms, tag }) => {
+        const plats =
+          platforms?.length && platforms.some((p) => p.trim())
+            ? platforms.map((p) => p.trim()).filter(Boolean)
+            : ['Facebook', 'Instagram']
+
         const { data: post, error } = await supabase
           .from('content_posts')
           .insert({
             organization_id: organizationId,
-            caption,
-            title: title ?? null,
-            tag: tag ?? null,
-            status: scheduled_at ? 'scheduled' : 'draft',
-            scheduled_at: scheduled_at ?? null,
+            caption: caption.trim(),
+            title: title?.trim() || caption.trim().slice(0, 48),
+            tag: tag?.trim() || 'Promo',
+            status: 'draft',
+            scheduled_at: null,
             created_by: userId,
           })
-          .select('id')
+          .select('id, caption, status, title, tag')
           .single()
 
-        if (error) return { ok: false, error: error.message }
-
-        const plats = platforms?.length ? platforms : ['Facebook', 'Instagram']
-        if (post?.id) {
-          await supabase.from('content_post_platforms').insert(
-            plats.map((platform) => ({ post_id: post.id, platform })),
-          )
-
-          await supabase.from('freya_activity_items').insert({
-            organization_id: organizationId,
-            kind: 'publish_post',
-            title: 'Review post draft',
-            summary: caption.slice(0, 120),
-            status: 'waiting',
-            payload: { action: 'publish_post', post_id: post.id },
-            href: '/app/content',
-            created_by: userId,
-          })
+        if (error || !post) {
+          return { ok: false, error: error?.message ?? 'Could not create draft' }
         }
 
-        return { ok: true, postId: post?.id, platforms: plats }
+        const { error: platError } = await supabase.from('content_post_platforms').insert(
+          plats.map((platform) => ({ post_id: post.id, platform })),
+        )
+        if (platError) {
+          return {
+            ok: false,
+            error: platError.message,
+            postId: post.id,
+          }
+        }
+
+        await supabase.from('freya_activity_items').insert({
+          organization_id: organizationId,
+          kind: 'publish_post',
+          title: 'Review post draft',
+          summary: caption.trim().slice(0, 120),
+          status: 'waiting',
+          payload: { action: 'publish_post', post_id: post.id },
+          href: '/app/content',
+          created_by: userId,
+        })
+
+        return {
+          ok: true,
+          postId: post.id,
+          status: 'draft',
+          platforms: plats,
+          path: '/app/content',
+          message: 'Draft saved under Posts → Drafts. Owner should review before publishing.',
+        }
       },
     }),
   }

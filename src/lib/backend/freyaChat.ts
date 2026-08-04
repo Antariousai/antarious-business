@@ -9,6 +9,7 @@ export type FreyaChatMessage = {
 export type FreyaChatResult = {
   text: string
   navigatePath?: string
+  focusPostId?: string
   openActivity?: boolean
   offline?: boolean
 }
@@ -36,7 +37,7 @@ function extractTextFromParts(parts: unknown): string {
 function applyToolOutput(
   toolName: string | undefined,
   output: unknown,
-  acc: { navigatePath?: string; openActivity?: boolean },
+  acc: { navigatePath?: string; openActivity?: boolean; focusPostId?: string },
 ) {
   if (!toolName) return
   if (toolName === 'navigate_hint' && output && typeof output === 'object') {
@@ -45,6 +46,14 @@ function applyToolOutput(
   }
   if (toolName === 'open_activity') {
     acc.openActivity = true
+  }
+  if (toolName === 'create_post_draft' && output && typeof output === 'object') {
+    const o = output as { ok?: boolean; postId?: string; path?: string }
+    if (o.ok && o.postId) {
+      acc.focusPostId = o.postId
+      acc.navigatePath = o.path || '/app/content'
+      acc.openActivity = true
+    }
   }
 }
 
@@ -104,7 +113,7 @@ export async function streamFreyaChat(
   const decoder = new TextDecoder()
   let buffer = ''
   let text = ''
-  const meta: { navigatePath?: string; openActivity?: boolean } = {}
+  const meta: { navigatePath?: string; openActivity?: boolean; focusPostId?: string } = {}
   const toolNames = new Map<string, string>()
 
   while (true) {

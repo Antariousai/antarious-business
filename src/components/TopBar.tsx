@@ -80,7 +80,7 @@ export function TopBar({
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask Freya or jump to Today, Posts, Messages…"
+              placeholder="Ask Freya or jump to Home, Posts, Messages…"
               className="h-10 w-72 rounded-full border border-sky/15 bg-white pr-4 pl-10 text-sm text-ink shadow-sm outline-none placeholder:text-neutral-400 focus:border-sky focus:ring-2 focus:ring-sky/25"
             />
           </form>

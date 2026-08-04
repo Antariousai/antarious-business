@@ -34,7 +34,7 @@ export const NAV: NavItem[] = [
   {
     to: '/app',
     end: true,
-    label: 'Today',
+    label: 'Home',
     sub: 'What needs you',
     icon: Home,
     module: 'today',
@@ -135,7 +135,7 @@ export const MOBILE_PRIMARY = NAV.filter((n) => n.mobilePrimary)
 export const MOBILE_MORE = NAV.filter((n) => !n.mobilePrimary)
 
 export const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
-  '/app': { title: 'Today' },
+  '/app': { title: 'Home' },
   '/app/content': { title: 'Posts' },
   '/app/campaigns': { title: 'Campaigns' },
   '/app/leads': { title: 'Interested people' },
@@ -152,8 +152,8 @@ export const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
 export const SEARCH_ROUTES: { q: string; path: string; label: string }[] = [
   { q: 'inbox', path: '/app/inbox', label: 'Messages' },
   { q: 'message', path: '/app/inbox', label: 'Messages' },
-  { q: 'today', path: '/app', label: 'Today' },
-  { q: 'home', path: '/app', label: 'Today' },
+  { q: 'today', path: '/app', label: 'Home' },
+  { q: 'home', path: '/app', label: 'Home' },
   { q: 'lead', path: '/app/leads', label: 'Interested people' },
   { q: 'interested', path: '/app/leads', label: 'Interested people' },
   { q: 'crm', path: '/app/pipeline', label: 'Customers' },

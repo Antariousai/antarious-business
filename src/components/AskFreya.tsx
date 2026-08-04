@@ -230,7 +230,11 @@ export function AskFreya() {
 
       if (result.openActivity) setPanelTab('activity')
       if (result.navigatePath) {
-        navigate(result.navigatePath)
+        navigate(result.navigatePath, {
+          state: result.focusPostId
+            ? { focusPostId: result.focusPostId, tab: 'feed' as const }
+            : undefined,
+        })
         closePanel()
       }
       void refreshActivity()

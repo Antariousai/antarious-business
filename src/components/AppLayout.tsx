@@ -13,7 +13,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const base = Object.keys(PAGE_META)
     .sort((a, b) => b.length - a.length)
     .find((k) => pathname === k || (k !== '/app' && pathname.startsWith(k)))
-  const meta = PAGE_META[base || '/app'] || { title: 'Today' }
+  const meta = PAGE_META[base || '/app'] || { title: 'Home' }
   const fillHeight =
     pathname.startsWith('/app/inbox') ||
     pathname.startsWith('/app/pipeline') ||

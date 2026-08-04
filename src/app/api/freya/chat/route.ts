@@ -54,26 +54,50 @@ export async function POST(req: Request) {
       credits: 1,
     })
 
-    const [{ data: bp }, { data: prefs }, { data: profile }, { data: goals }, { data: channels }, planTier] =
-      await Promise.all([
-        supabase
-          .from('business_profiles')
-          .select('business_name, industry, customers')
-          .eq('organization_id', ctx.organizationId)
-          .maybeSingle(),
-        supabase
-          .from('freya_preferences')
-          .select('tone')
-          .eq('organization_id', ctx.organizationId)
-          .maybeSingle(),
-        supabase.from('profiles').select('full_name').eq('id', ctx.user.id).maybeSingle(),
-        supabase.from('business_goals').select('goal_id').eq('organization_id', ctx.organizationId),
-        supabase
-          .from('channel_preferences')
-          .select('platform')
-          .eq('organization_id', ctx.organizationId),
-        getOrgPlanTier(supabase, ctx.organizationId),
-      ])
+    const [
+      { data: bp },
+      { data: prefs },
+      { data: profile },
+      { data: goals },
+      { data: channels },
+      planTier,
+      waitingRes,
+      draftsRes,
+      inboxRes,
+    ] = await Promise.all([
+      supabase
+        .from('business_profiles')
+        .select('business_name, industry, customers')
+        .eq('organization_id', ctx.organizationId)
+        .maybeSingle(),
+      supabase
+        .from('freya_preferences')
+        .select('tone')
+        .eq('organization_id', ctx.organizationId)
+        .maybeSingle(),
+      supabase.from('profiles').select('full_name').eq('id', ctx.user.id).maybeSingle(),
+      supabase.from('business_goals').select('goal_id').eq('organization_id', ctx.organizationId),
+      supabase
+        .from('channel_preferences')
+        .select('platform')
+        .eq('organization_id', ctx.organizationId),
+      getOrgPlanTier(supabase, ctx.organizationId),
+      supabase
+        .from('freya_activity_items')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'waiting'),
+      supabase
+        .from('content_posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'draft'),
+      supabase
+        .from('inbox_threads')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'open'),
+    ])
 
     const agent = createFreyaRouterAgent(supabase, {
       organizationId: ctx.organizationId,
@@ -87,6 +111,9 @@ export async function POST(req: Request) {
         planTier,
         tone: prefs?.tone,
         ownerName: profile?.full_name,
+        waitingApprovals: waitingRes.count ?? 0,
+        draftPosts: draftsRes.count ?? 0,
+        openInbox: inboxRes.count ?? 0,
       },
     })
 

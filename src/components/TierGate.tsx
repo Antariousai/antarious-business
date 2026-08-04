@@ -24,7 +24,7 @@ export function TierGate({ children }: { children: ReactNode }) {
       <p className="text-[18px] font-bold text-ink">This is on {needLabel}</p>
       <p className="mt-2 text-[14px] leading-relaxed text-muted">
         You’re on {PLAN_TIERS[planTier].label}. You can try {needLabel} now (demo) or head back to
-        Today.
+        Home.
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <button
@@ -38,7 +38,7 @@ export function TierGate({ children }: { children: ReactNode }) {
           to="/app"
           className="rounded-full border border-slate-200 px-5 py-2.5 text-[13px] font-semibold text-slate-600 hover:bg-slate-50"
         >
-          Back to Today
+          Back to Home
         </Link>
       </div>
     </div>

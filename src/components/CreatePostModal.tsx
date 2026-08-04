@@ -81,7 +81,8 @@ export function CreatePostModal({
     if (post) return postPlatforms(post)
     if (connectedPlatforms.length) return [connectedPlatforms[0]!]
     if (bizCtx.platforms?.length) return [bizCtx.platforms[0]!]
-    return []
+    // Always have a target channel for drafts even before OAuth connect.
+    return ['Facebook', 'Instagram']
   })
   const [caption, setCaption] = useState(post?.caption ?? initialCaption)
   const [tag, setTag] = useState(post?.tag ?? 'Food')
@@ -277,7 +278,13 @@ export function CreatePostModal({
     try {
       const assets = await resolveAssets()
       const input = buildInput(status, assets)
-      input.platforms = status === 'draft' ? platforms : publishPlatforms
+      const plats =
+        (status === 'draft' ? platforms : publishPlatforms).length > 0
+          ? status === 'draft'
+            ? platforms
+            : publishPlatforms
+          : (['Facebook', 'Instagram'] as Platform[])
+      input.platforms = plats
       if (status === 'draft') {
         input.scheduledAt = undefined
       }
@@ -288,7 +295,7 @@ export function CreatePostModal({
       }
       onClose()
     } catch (err) {
-      setMediaError(err instanceof Error ? err.message : 'Could not save media. Try again.')
+      setMediaError(err instanceof Error ? err.message : 'Could not save draft. Try again.')
     } finally {
       setBuilding(false)
     }
@@ -297,8 +304,9 @@ export function CreatePostModal({
   const busy = applying || building
   const hasCaption = caption.trim().length > 0
   const hasMedia = uploads.length > 0
-  const fullAutoReady = !leaveToFreya || freyaDrafted
-  const canSave = hasCaption && fullAutoReady
+  const fullAutoReady = !leaveToFreya || freyaDrafted || showManualEditor
+  // Save draft only needs a caption (+ Freya done if auto mode still showing review).
+  const canSave = hasCaption && (!leaveToFreya || freyaDrafted || showManualEditor)
   const selectedConnected = platforms.filter((p) => connectedPlatforms.includes(p))
   const canPublish =
     hasConnectedPlatform &&

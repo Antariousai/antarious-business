@@ -132,35 +132,44 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   const createPost = useCallback(
     async (input: SavePostInput): Promise<ContentPost> => {
       if (backend) {
+        const platforms =
+          input.platforms?.length > 0 ? input.platforms : (['Facebook', 'Instagram'] as Platform[])
         const data = await apiFetch<{ post: Parameters<typeof mapApiPost>[0] }>('/api/posts', {
           method: 'POST',
           body: JSON.stringify({
             caption: input.caption,
-            tag: input.tag,
-            status: input.status,
-            scheduled_at: input.scheduledAt ?? null,
-            platforms: input.platforms,
+            tag: input.tag || 'Promo',
+            status: input.status || 'draft',
+            scheduled_at: input.status === 'draft' ? null : (input.scheduledAt ?? null),
+            platforms,
             assets: (input.assets ?? [])
               .filter((a) => a.path)
               .map((a) => ({ path: a.path, mimeType: a.mimeType })),
           }),
         })
+        if (!data?.post?.id) {
+          throw new Error('Post was not saved. Please try again.')
+        }
+        // Prefer server row (includes status + platforms) then refresh list.
+        await refresh()
         const mapped = mapApiPost({
           ...data.post,
-          content_post_platforms: input.platforms.map((platform) => ({ platform })),
+          content_post_platforms:
+            data.post.content_post_platforms ??
+            platforms.map((platform) => ({ platform })),
           image_url: data.post.image_url || input.assets?.[0]?.url || input.image || '',
         })
-        if (!mapped.image && (input.assets?.[0]?.url || input.image)) {
-          mapped.image = input.assets?.[0]?.url || input.image
-        }
-        setPosts((prev) => [mapped, ...prev])
+        setPosts((prev) => {
+          if (prev.some((p) => p.id === mapped.id)) return prev
+          return [mapped, ...prev]
+        })
         return mapped
       }
 
       const post: ContentPost = {
         id: `p-${Date.now()}`,
         platform: input.platforms[0] ?? 'Instagram',
-        platforms: input.platforms,
+        platforms: input.platforms.length ? input.platforms : ['Instagram'],
         author: input.author ?? 'You',
         status: input.status,
         caption: input.caption,
@@ -176,7 +185,7 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       persistLocal([post, ...posts])
       return post
     },
-    [backend, persistLocal, posts],
+    [backend, persistLocal, posts, refresh],
   )
 
   const updatePost = useCallback(
@@ -204,17 +213,26 @@ export function ContentProvider({ children }: { children: ReactNode }) {
               : {}),
           }),
         })
+        if (!data?.post?.id) {
+          throw new Error('Post was not updated. Please try again.')
+        }
+        await refresh()
         const mapped = mapApiPost({
           ...data.post,
           content_post_platforms:
+            data.post.content_post_platforms ??
             input.platforms?.map((platform) => ({ platform })) ??
-            data.post.content_post_platforms,
+            null,
           image_url: data.post.image_url || input.assets?.[0]?.url || input.image || data.post.image_url,
         })
         if (!mapped.image && (input.assets?.[0]?.url || input.image)) {
           mapped.image = input.assets?.[0]?.url || input.image || ''
         }
-        setPosts((prev) => prev.map((p) => (p.id === id ? mapped : p)))
+        setPosts((prev) => {
+          const next = prev.map((p) => (p.id === id ? mapped : p))
+          if (!next.some((p) => p.id === id)) return [mapped, ...next]
+          return next
+        })
         return mapped
       }
 
@@ -237,7 +255,7 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       persistLocal(next)
       return updated
     },
-    [backend, persistLocal, posts],
+    [backend, persistLocal, posts, refresh],
   )
 
   const resetPosts = useCallback(() => {

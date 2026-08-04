@@ -39,10 +39,14 @@ export function ContentPage() {
   const [createLeaveToFreya, setCreateLeaveToFreya] = useState(false)
   const [savedTplId, setSavedTplId] = useState<string | null>(null)
   const [focusPostId, setFocusPostId] = useState<string | null>(null)
-  const { posts } = useContent()
+  const { posts, refresh } = useContent()
   const { saveFromPost, useTemplate } = useTemplates()
   const location = useLocation()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    void refresh().catch(() => {})
+  }, [refresh])
 
   useEffect(() => {
     const state = location.state as {
@@ -75,18 +79,22 @@ export function ContentPage() {
     if (state.focusPostId) {
       const id = state.focusPostId
       setTab('feed')
-      setFilter('all')
+      setFilter('draft')
       setFocusPostId(id)
-      window.setTimeout(() => {
-        document.getElementById(`post-${id}`)?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
+      void refresh()
+        .catch(() => {})
+        .finally(() => {
+          window.setTimeout(() => {
+            document.getElementById(`post-${id}`)?.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+            })
+          }, 120)
         })
-      }, 80)
       window.setTimeout(() => setFocusPostId(null), 3500)
     }
     navigate(location.pathname, { replace: true, state: null })
-  }, [location, navigate, useTemplate])
+  }, [location, navigate, useTemplate, refresh])
 
   const filtered = useMemo(() => {
     if (filter === 'all') return posts
@@ -170,9 +178,9 @@ export function ContentPage() {
             {(
               [
                 ['all', `All — ${counts.all}`],
-                ['draft', 'Draft'],
-                ['scheduled', 'Scheduled'],
-                ['published', 'Published'],
+                ['draft', `Draft — ${counts.draft}`],
+                ['scheduled', `Scheduled — ${counts.scheduled}`],
+                ['published', `Published — ${counts.published}`],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -313,6 +321,9 @@ export function ContentPage() {
             setCreateCaption('')
             setCreatePrompt('')
             setCreateLeaveToFreya(false)
+            setTab('feed')
+            setFilter('draft')
+            void refresh().catch(() => {})
           }}
           initialCaption={createCaption}
           initialPrompt={createPrompt}
