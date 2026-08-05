@@ -639,22 +639,20 @@ a,
 }
 
 .route-fade {
-  min-height: 100dvh;
-  opacity: 0;
+  min-height: 0;
+  opacity: 1;
 }
 
 .route-fade-in {
-  animation: route-enter 0.58s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: route-enter 0.14s ease-out;
 }
 
 @keyframes route-enter {
   from {
-    opacity: 0;
-    transform: translateY(8px);
+    opacity: 0.92;
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 

@@ -80,7 +80,7 @@ export function freyaRouterTools(
           return {
             ok: false as const,
             code: 'PLAN' as const,
-            error: `Your plan cannot open ${path}. Upgrade in Settings to unlock that screen.`,
+            error: `That screen is on a higher plan. On your current plan I can open Posts, Messages, Customers, Money, or Settings instead.`,
             path: '/app/settings',
             reason,
           }

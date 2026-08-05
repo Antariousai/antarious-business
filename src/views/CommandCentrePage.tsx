@@ -20,6 +20,7 @@ import {
   Banknote,
   HandCoins,
   Zap,
+  ExternalLink,
 } from 'lucide-react'
 import { Avatar } from '../components/Avatar'
 import { PlatformIcon } from '../components/PlatformIcon'
@@ -133,6 +134,14 @@ export function CommandCentrePage() {
   const industry = profile?.industry || 'boutique retail'
   const coverSrc = profile?.coverUrl || BOUTIQUE.boutiqueCounter
   const logoSrc = profile?.logoUrl || BOUTIQUE.kurtiRack
+  /** Connected channels first; fall back to preferred platforms from profile. */
+  const socialChannels = useMemo(() => {
+    if (prefs.connectedChannels.length > 0) return prefs.connectedChannels
+    if (prefs.connectedPlatforms.length > 0) {
+      return prefs.connectedPlatforms.map((platform) => ({ platform, pageUrl: '' }))
+    }
+    return (profile?.platforms ?? []).map((platform) => ({ platform, pageUrl: '' }))
+  }, [prefs.connectedChannels, prefs.connectedPlatforms, profile?.platforms])
   const freyaWaiting = freyaActivity.filter((a) => a.status === 'waiting')
   const approvalPosts = freyaWaiting.filter((a) => a.kind === 'post')
   const messages = freyaWaiting.filter((a) => a.kind === 'message')
@@ -257,16 +266,16 @@ export function CommandCentrePage() {
         />
 
         {/* Cover photo */}
-        <div className="group/cover relative h-36 w-full sm:h-44 md:h-52">
+        <div className="group/cover relative z-0 h-36 w-full sm:h-44 md:h-52">
           <img src={coverSrc} alt="" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0b1220] via-[#0b1220]/35 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0b1220]/50 via-transparent to-[#0b1220]/20" />
-          <span className="absolute top-4 left-4 inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white/95 uppercase backdrop-blur-sm ring-1 ring-white/15">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0b1220] via-[#0b1220]/35 to-transparent" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0b1220]/50 via-transparent to-[#0b1220]/20" />
+          <span className="pointer-events-none absolute top-4 left-4 inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white/95 uppercase backdrop-blur-sm ring-1 ring-white/15">
             <Sparkles className="h-3 w-3 text-sunshine" />
             Today
           </span>
           {needsOk > 0 && (
-            <span className="absolute top-4 right-4 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 to-orange-400 px-2.5 py-1 text-[11px] font-bold text-navy-deep shadow-sm shadow-amber-400/40">
+            <span className="pointer-events-none absolute top-4 right-4 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 to-orange-400 px-2.5 py-1 text-[11px] font-bold text-navy-deep shadow-sm shadow-amber-400/40">
               <Clock className="h-3 w-3" />
               {needsOk} need{needsOk === 1 ? 's' : ''} OK
             </span>
@@ -275,7 +284,7 @@ export function CommandCentrePage() {
             type="button"
             disabled={uploading === 'cover'}
             onClick={() => coverInputRef.current?.click()}
-            className="absolute right-4 bottom-4 inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-[12px] font-bold text-white backdrop-blur-sm ring-1 ring-white/20 transition hover:bg-black/70 disabled:opacity-60 sm:opacity-0 sm:group-hover/cover:opacity-100"
+            className="absolute right-3 bottom-3 z-30 inline-flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-[12px] font-bold text-white shadow-lg backdrop-blur-sm ring-1 ring-white/25 transition hover:bg-black/75 disabled:opacity-60 sm:right-4 sm:bottom-4"
           >
             {uploading === 'cover' ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -286,10 +295,10 @@ export function CommandCentrePage() {
           </button>
         </div>
 
-        {/* Shop identity strip */}
-        <div className="relative px-5 pb-2 md:px-8">
+        {/* Shop identity strip — pulled up over cover; empty space must not steal cover clicks */}
+        <div className="relative z-10 px-5 pb-2 pointer-events-none md:px-8">
           <div className="-mt-12 flex flex-wrap items-end gap-4 sm:-mt-14">
-            <div className="group/logo relative shrink-0">
+            <div className="group/logo relative shrink-0 pointer-events-auto">
               <div className="h-24 w-24 overflow-hidden rounded-2xl bg-white p-1 shadow-xl shadow-black/40 ring-4 ring-[#0b1220] sm:h-28 sm:w-28 sm:rounded-3xl">
                 <img
                   src={logoSrc}
@@ -310,34 +319,21 @@ export function CommandCentrePage() {
                   <Camera className="h-5 w-5" />
                 )}
               </button>
-              <span className="absolute -right-1 -bottom-1 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-bright to-cyan-400 text-[13px] font-extrabold text-white shadow-md ring-2 ring-[#0b1220]">
+              <span className="pointer-events-none absolute -right-1 -bottom-1 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-bright to-cyan-400 text-[13px] font-extrabold text-white shadow-md ring-2 ring-[#0b1220]">
                 {shopInitial}
               </span>
               <span
-                className="absolute top-1 right-1 h-3 w-3 rounded-full bg-online ring-2 ring-white"
+                className="pointer-events-none absolute top-1 right-1 h-3 w-3 rounded-full bg-online ring-2 ring-white"
                 title="Online"
               />
             </div>
 
-            <div className="min-w-0 flex-1 pb-1 pt-3 sm:pt-0">
+            <div className="min-w-0 flex-1 pb-1 pt-3 pointer-events-auto sm:pt-0">
               <h2 className="truncate text-[24px] font-extrabold tracking-tight text-white sm:text-[28px]">
                 {biz}
               </h2>
               <p className="mt-0.5 text-[13px] font-medium text-white/65">
                 {industry ? industry.charAt(0).toUpperCase() + industry.slice(1) : 'Business'}
-                {prefs.connectedPlatforms.length > 0 && (
-                  <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    {prefs.connectedPlatforms.map((p) => (
-                      <span
-                        key={p}
-                        className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/15"
-                      >
-                        <PlatformIcon platform={p} size={12} tone="white" />
-                        {p}
-                      </span>
-                    ))}
-                  </span>
-                )}
               </p>
               {brandError && (
                 <p className="mt-2 text-[12px] font-semibold text-rose-300">{brandError}</p>
@@ -347,7 +343,7 @@ export function CommandCentrePage() {
             <button
               type="button"
               onClick={letFreyaRun}
-              className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2.5 text-[13px] font-bold text-sky-bright shadow-lg shadow-sky/30 hover:bg-sky-soft"
+              className="pointer-events-auto mb-1 inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2.5 text-[13px] font-bold text-sky-bright shadow-lg shadow-sky/30 hover:bg-sky-soft"
             >
               <Sparkles className="h-3.5 w-3.5" />
               Let Freya handle it
@@ -376,6 +372,38 @@ export function CommandCentrePage() {
               )}
               {goalLabels.length > 0 && <> Focus: {goalLabels.join(' · ')}.</>}
             </p>
+            {socialChannels.length > 0 && (
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                <span className="text-[11px] font-bold tracking-wide text-white/45 uppercase">
+                  Your pages
+                </span>
+                {socialChannels.map((c) =>
+                  c.pageUrl ? (
+                    <a
+                      key={c.platform}
+                      href={c.pageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[12px] font-semibold text-ink shadow-sm transition hover:bg-sky-soft"
+                    >
+                      <PlatformIcon platform={c.platform} size={14} tone="brand" />
+                      {c.platform}
+                      <ExternalLink className="h-3 w-3 text-slate-400" />
+                    </a>
+                  ) : (
+                    <Link
+                      key={c.platform}
+                      to="/app/settings"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1 text-[12px] font-semibold text-ink shadow-sm hover:bg-sky-soft"
+                      title="Add page URL in Settings to open this page"
+                    >
+                      <PlatformIcon platform={c.platform} size={14} tone="brand" />
+                      {c.platform}
+                    </Link>
+                  ),
+                )}
+              </div>
+            )}
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-2.5">

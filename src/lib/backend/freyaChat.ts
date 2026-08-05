@@ -1,4 +1,5 @@
 import { hasSupabaseEnv } from './mode'
+import { applyBoundarySoftCleanup } from '@/lib/agents/boundaryLint'
 
 export type FreyaChatMessage = {
   id: string
@@ -37,6 +38,9 @@ export type FreyaChatResult = {
   openActivity?: boolean
   refreshModules?: FreyaRefreshModule[]
   offline?: boolean
+  /** Part 19.1 boundary lint hits (soft — reply still shown). */
+  boundaryFlagged?: boolean
+  boundaryPhrases?: string[]
 }
 
 export type FreyaStreamHandlers = {
@@ -58,6 +62,7 @@ type ToolMeta = {
   focusPostId?: string
   refreshModules: Set<FreyaRefreshModule>
   cards: FreyaOutputCard[]
+  hadToolSuccess: boolean
 }
 
 const TOOL_STATUS: Record<string, string> = {
@@ -98,8 +103,7 @@ export function statusForTool(toolName: string | undefined): string {
 }
 
 /**
- * Freya should not show em/en dashes in owner-facing chat.
- * Turns “Done — I saved…” into “Done. I saved…”.
+ * Em/en dash cleanup only (safe to run repeatedly while streaming).
  */
 export function sanitizeFreyaPunctuation(text: string): string {
   return text
@@ -107,6 +111,31 @@ export function sanitizeFreyaPunctuation(text: string): string {
     .replace(/\.\s+\./g, '.')
     .replace(/([.!?])\s*\./g, '$1')
     .replace(/ {2,}/g, ' ')
+}
+
+/**
+ * Dash sanitize + Part 19.1 soft-completion cleanup when no outbound tool success.
+ * Does not hard-fail replies; logs boundary hits for review.
+ */
+export function sanitizeFreyaReply(
+  text: string,
+  opts?: { hadOutboundToolSuccess?: boolean },
+): { text: string; boundaryFlagged?: boolean; boundaryPhrases?: string[] } {
+  const dashed = sanitizeFreyaPunctuation(text)
+
+  const { text: cleaned, lint } = applyBoundarySoftCleanup(dashed, {
+    hadOutboundToolSuccess: opts?.hadOutboundToolSuccess,
+  })
+
+  if (lint.flagged && typeof console !== 'undefined') {
+    console.warn('[freya-boundary]', lint.hits.map((h) => h.phrase).join(', '))
+  }
+
+  return {
+    text: cleaned,
+    boundaryFlagged: lint.flagged || undefined,
+    boundaryPhrases: lint.flagged ? lint.hits.map((h) => h.phrase) : undefined,
+  }
 }
 
 /**
@@ -179,6 +208,24 @@ function buildCardFromTool(toolName: string, output: unknown, acc: ToolMeta) {
   if (!output || typeof output !== 'object') return
   const o = output as Record<string, unknown>
   if (o.ok === false) {
+    if (o.code === 'NEED_INPUT') {
+      const missing = Array.isArray(o.missing) ? o.missing.map(String) : []
+      const options = Array.isArray(o.options) ? o.options.map(String).filter(Boolean) : []
+      const optionLine = options.length
+        ? options.map((opt, i) => `${i + 1}) ${opt}`).join(' · ')
+        : undefined
+      pushCard(acc, {
+        kind: 'need_input',
+        title: options.length ? 'Pick or tell me' : 'Need a bit more',
+        body: str(
+          o.askHint ||
+            (missing.length ? `Need: ${missing.join(', ')}` : 'Need a bit more before I can save that.'),
+          320,
+        ),
+        meta: optionLine || (missing.length ? missing.join(' · ') : undefined),
+      })
+      return
+    }
     pushCard(acc, {
       kind: 'error',
       title: o.code === 'PLAN' ? 'Upgrade needed' : 'Couldn’t finish that',
@@ -414,7 +461,13 @@ function applyToolOutput(toolName: string | undefined, output: unknown, acc: Too
     return
   }
 
+  // Missing required create fields: surface ask card only — no navigate/refresh.
+  if (o.ok === false && o.code === 'NEED_INPUT') {
+    return
+  }
+
   if (!isOk(output)) return
+  acc.hadToolSuccess = true
 
   if (toolName === 'navigate_hint' && o.path) {
     acc.navigatePath = o.path
@@ -543,14 +596,18 @@ export async function streamFreyaChat(
       content?: string
       offline?: boolean
       error?: string
+      crisis?: boolean
     }
-    const text = data.content ?? data.error ?? 'Hmm, I blanked for a second. Try again?'
-    const split = splitFreyaReply(text)
-    handlers.onDelta?.(split.body || text)
+    const raw = data.content ?? data.error ?? 'Hmm, I blanked for a second. Try again?'
+    const sanitized = sanitizeFreyaReply(raw, { hadOutboundToolSuccess: false })
+    const split = splitFreyaReply(sanitized.text)
+    handlers.onDelta?.(split.body || sanitized.text)
     return {
-      text: split.body || text,
+      text: split.body || sanitized.text,
       followUp: split.followUp,
       offline: Boolean(data.offline),
+      boundaryFlagged: sanitized.boundaryFlagged,
+      boundaryPhrases: sanitized.boundaryPhrases,
     }
   }
 
@@ -562,7 +619,7 @@ export async function streamFreyaChat(
   const decoder = new TextDecoder()
   let buffer = ''
   let text = ''
-  const meta: ToolMeta = { refreshModules: new Set(), cards: [] }
+  const meta: ToolMeta = { refreshModules: new Set(), cards: [], hadToolSuccess: false }
   const toolNames = new Map<string, string>()
   let sawTool = false
 
@@ -614,17 +671,22 @@ export async function streamFreyaChat(
 
   if (sawTool && !text) handlers.onStatus?.('Almost done…')
 
-  const split = splitFreyaReply(text || (meta.cards.length ? 'Here’s what I did.' : 'Done.'))
+  const sanitized = sanitizeFreyaReply(text || (meta.cards.length ? 'Here’s what I did.' : 'Done.'), {
+    hadOutboundToolSuccess: meta.hadToolSuccess,
+  })
+  const split = splitFreyaReply(sanitized.text)
 
   // Prefer tool-returned caption on post cards when tool didn’t embed it.
   return {
-    text: split.body || text || 'Done.',
+    text: split.body || sanitized.text || 'Done.',
     followUp: split.followUp,
     cards: meta.cards.length ? meta.cards : undefined,
     navigatePath: meta.navigatePath,
     focusPostId: meta.focusPostId,
     openActivity: meta.openActivity,
     refreshModules: [...meta.refreshModules],
+    boundaryFlagged: sanitized.boundaryFlagged,
+    boundaryPhrases: sanitized.boundaryPhrases,
   }
 }
 

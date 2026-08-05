@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "oxlint",
+    "test:freya": "vitest run src/lib/agents/__tests__ --pool=forks --poolOptions.forks.singleFork=true",
     "build:freya-gifs": "python scripts/build-freya-gifs.py",
     "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
     "db:reset": "supabase db reset"
@@ -31,6 +32,7 @@
     "oxlint": "^1.71.0",
     "postcss": "^8.5.0",
     "tailwindcss": "^4.3.2",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.7"
   }
 }

@@ -5,6 +5,7 @@ import { TopBar } from './TopBar'
 import { MobileNav } from './MobileNav'
 import { AskFreya } from './AskFreya'
 import { FreyaTour } from './FreyaTour'
+import { RouteFade } from './RouteFade'
 import { PAGE_META } from './navConfig'
 
 export function AppLayout({ children }: { children?: ReactNode }) {
@@ -43,7 +44,13 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             }
           >
             <OutletProvider outlet={children ?? null}>
-              <Outlet />
+              <RouteFade
+                className={
+                  fillHeight ? 'flex min-h-0 flex-1 flex-col' : undefined
+                }
+              >
+                <Outlet />
+              </RouteFade>
             </OutletProvider>
           </div>
         </main>

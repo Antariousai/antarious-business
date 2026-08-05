@@ -7,16 +7,62 @@ import {
   type AppModule,
   type PlanTier,
 } from '@/data/planTiers'
+import { gateCreateInput } from './createInputPolicy'
 
-/** Shared plan gate for Freya tools — refuse before writing to a locked module. */
+/** Friendly feature label + substitute for Sweet No plan denials. */
+const MODULE_SWEET_NO: Partial<
+  Record<AppModule, { feature: string; substitute: string }>
+> = {
+  campaigns: {
+    feature: 'Campaigns',
+    substitute: 'draft a run of posts in Posts that covers most of the same job',
+  },
+  ideas: {
+    feature: 'Ideas / Discover',
+    substitute: 'sketch post ideas in chat and save them under Posts',
+  },
+  templates: {
+    feature: 'Templates',
+    substitute: 'draft captions from scratch in Posts',
+  },
+  team: {
+    feature: 'Team',
+    substitute: 'keep working solo here and queue drafts for your Approve',
+  },
+  messages: {
+    feature: 'Messages',
+    substitute: 'draft the wording here for you to paste',
+  },
+  leads: {
+    feature: 'Interested people',
+    substitute: 'note names in chat until that module is on your plan',
+  },
+  customers: {
+    feature: 'Customers',
+    substitute: 'track next steps in chat and Money for amounts',
+  },
+  money: {
+    feature: 'Money',
+    substitute: 'draft the invoice wording here for you to copy',
+  },
+  posts: {
+    feature: 'Posts',
+    substitute: 'write the caption in chat for you to copy',
+  },
+}
+
+/** Shared plan gate for Freya tools — Sweet No before writing to a locked module. */
 export function denyIfNoModule(tier: PlanTier | string | null | undefined, module: AppModule) {
   if (canAccessModule(tier as PlanTier | null | undefined, module)) return null
   const need = minTierForModule(module)
   const current = tier || 'starter'
+  const copy = MODULE_SWEET_NO[module]
+  const feature = copy?.feature ?? module
+  const substitute = copy?.substitute ?? 'help with Posts, Messages, and Money on your current plan'
   return {
     ok: false as const,
     code: 'PLAN' as const,
-    error: `That needs the ${need} plan (this workspace is on ${current}). Open Settings to upgrade — don’t create the item yet.`,
+    error: `${feature} is on ${need}. On ${current} I can ${substitute}. Open Settings when you want to upgrade.`,
     path: '/app/settings',
     upgradeTo: need,
   }
@@ -102,7 +148,7 @@ export function inboxReplierTools(
 
     draft_reply: tool({
       description:
-        'Draft a Freya reply for an inbox thread (creates freya_draft + waiting approval to send). Never sends until the owner approves.',
+        'Draft a reply for an inbox thread (creates freya_draft + waiting for owner OK). Call only when threadId came from list_threads/summarize_thread and body is grounded in that thread. If missing, do not invent — ask. Say drafted / waiting for your OK — never sent, emailed, or DMed.',
       inputSchema: z.object({
         threadId: z.string(),
         body: z.string(),
@@ -110,6 +156,8 @@ export function inboxReplierTools(
       execute: async ({ threadId, body }) => {
         const denied = denyIfNoModule(planTier, 'messages')
         if (denied) return denied
+        const need = gateCreateInput('draft_reply', { threadId, body })
+        if (need) return need
         const { data, error } = await supabase
           .from('inbox_messages')
           .insert({
@@ -147,7 +195,8 @@ export function leadAssistantTools(
 ) {
   return {
     list_leads: tool({
-      description: 'List leads (interested people). Optional stage filter: new, contacted, qualified, converted.',
+      description:
+        'List Interested people. Optional stage filter: new, contacted, qualified, converted. Do not say CRM or pipeline.',
       inputSchema: z.object({
         stage: z.string().optional(),
         limit: z.number().min(1).max(30).optional(),
@@ -170,7 +219,7 @@ export function leadAssistantTools(
 
     create_lead: tool({
       description:
-        'Create a lead immediately as stage new (or given stage). Does not need approval to create — follow-ups stay manual or via activity later.',
+        'Save someone under Interested people (creates immediately). Call only when the owner gave a real name this turn or earlier in chat. If missing, do not invent — ask. Say added/saved — never reached out, contacted externally, or followed up with them.',
       inputSchema: z.object({
         name: z.string(),
         company: z.string().optional(),
@@ -182,6 +231,8 @@ export function leadAssistantTools(
       execute: async (lead) => {
         const denied = denyIfNoModule(planTier, 'leads')
         if (denied) return denied
+        const need = gateCreateInput('create_lead', lead as Record<string, unknown>)
+        if (need) return need
         const { data, error } = await supabase
           .from('leads')
           .insert({
@@ -208,7 +259,8 @@ export function leadAssistantTools(
     }),
 
     update_lead_stage: tool({
-      description: 'Move a lead to a new stage (new, contacted, qualified, converted).',
+      description:
+        'Move an Interested person to a new stage (new, contacted, qualified, converted). Call only with a real leadId from list_leads. If unclear which person, ask — do not invent an id. Say moved/updated — never reached out.',
       inputSchema: z.object({
         leadId: z.string(),
         stage: z.string().describe('Stage key for this org funnel (e.g. new, contacted, or a custom step key)'),
@@ -217,6 +269,8 @@ export function leadAssistantTools(
       execute: async ({ leadId, stage, notes }) => {
         const denied = denyIfNoModule(planTier, 'leads')
         if (denied) return denied
+        const need = gateCreateInput('update_lead_stage', { leadId, stage, notes })
+        if (need) return need
         const { data: existing } = await supabase
           .from('leads')
           .select('stage')
@@ -259,7 +313,8 @@ export function crmCopilotTools(
 ) {
   return {
     list_deals: tool({
-      description: 'List CRM pipeline deals. Optional stage filter.',
+      description:
+        'List Customer deals by stage. Optional stage filter. Say moved/updated — never closed or signed unless data shows it.',
       inputSchema: z.object({
         stage: z.string().optional(),
         limit: z.number().min(1).max(30).optional(),
@@ -281,23 +336,28 @@ export function crmCopilotTools(
     }),
 
     create_deal: tool({
-      description: 'Create a CRM deal in draft/qualified stage for the pipeline.',
+      description:
+        'Create a Customer deal (saved in app). Call only when the owner gave a real title/name and a BDT amount (use 0 only if they said zero/no amount). If missing, do not invent — ask. Say added/saved — never reached out or closed the deal.',
       inputSchema: z.object({
         title: z.string(),
-        valueBdt: z.number().optional(),
+        valueBdt: z
+          .number()
+          .describe('Deal value in BDT. Required — only 0 when the owner said zero or no amount.'),
         stage: z.string().optional(),
         nextStep: z.string().optional(),
       }),
       execute: async ({ title, valueBdt, stage, nextStep }) => {
         const denied = denyIfNoModule(planTier, 'customers')
         if (denied) return denied
+        const need = gateCreateInput('create_deal', { title, valueBdt, stage, nextStep })
+        if (need) return need
         const { data, error } = await supabase
           .from('crm_deals')
           .insert({
             organization_id: organizationId,
             title,
             stage: stage ?? 'qualified',
-            value_bdt: valueBdt ?? 0,
+            value_bdt: valueBdt,
             next_step: nextStep ?? null,
           })
           .select('id, title, stage')
@@ -309,7 +369,8 @@ export function crmCopilotTools(
     }),
 
     suggest_next_step: tool({
-      description: 'Suggest and save a next step for an existing deal.',
+      description:
+        'Suggest and save a next step for an existing deal. Call only with a real dealId from list_deals. If unclear which deal, ask — do not invent an id.',
       inputSchema: z.object({
         dealId: z.string(),
         title: z.string().optional(),
@@ -317,6 +378,8 @@ export function crmCopilotTools(
       execute: async ({ dealId, title }) => {
         const denied = denyIfNoModule(planTier, 'customers')
         if (denied) return denied
+        const need = gateCreateInput('suggest_next_step', { dealId, title })
+        if (need) return need
         const next =
           title?.toLowerCase().includes('gift')
             ? 'Send swatches + confirm delivery date on WhatsApp'
@@ -363,15 +426,18 @@ export function moneyAssistantTools(
     }),
 
     draft_invoice: tool({
-      description: 'Draft a BDT invoice (creates draft invoice row immediately).',
+      description:
+        'Draft a BDT (৳) invoice in Money (saved as draft). Call only when the owner gave totalBdt and who/what (notes). If missing, do not invent — ask. Say drafted/saved in Money — never emailed, charged, or payment cleared.',
       inputSchema: z.object({
         totalBdt: z.number(),
-        notes: z.string().optional(),
+        notes: z.string().describe('Who or what the invoice is for (party / description from the owner)'),
         dueInDays: z.number().optional(),
       }),
       execute: async ({ totalBdt, notes, dueInDays }) => {
         const denied = denyIfNoModule(planTier, 'money')
         if (denied) return denied
+        const need = gateCreateInput('draft_invoice', { totalBdt, notes, dueInDays })
+        if (need) return need
         const due = new Date()
         due.setDate(due.getDate() + (dueInDays ?? 7))
         const { data, error } = await supabase
@@ -382,7 +448,7 @@ export function moneyAssistantTools(
             status: 'draft',
             total_bdt: totalBdt,
             due_at: due.toISOString().slice(0, 10),
-            notes: notes ?? null,
+            notes: notes,
           })
           .select('id')
           .single()
@@ -399,15 +465,18 @@ export function moneyAssistantTools(
     }),
 
     draft_bill: tool({
-      description: 'Draft a bill / payable (money_bills) for tracking outbound money.',
+      description:
+        'Draft a bill / payable in Money for tracking. Call only when the owner gave totalBdt and what it is for (notes). If missing, do not invent — ask. Say drafted/saved — never paid or refunded.',
       inputSchema: z.object({
         totalBdt: z.number(),
-        notes: z.string().optional(),
+        notes: z.string().describe('What the bill is for (from the owner)'),
         dueInDays: z.number().optional(),
       }),
       execute: async ({ totalBdt, notes, dueInDays }) => {
         const denied = denyIfNoModule(planTier, 'money')
         if (denied) return denied
+        const need = gateCreateInput('draft_bill', { totalBdt, notes, dueInDays })
+        if (need) return need
         const due = new Date()
         due.setDate(due.getDate() + (dueInDays ?? 7))
         const { data, error } = await supabase
@@ -422,14 +491,12 @@ export function moneyAssistantTools(
           .select('id')
           .single()
         if (error) return { ok: false, error: error.message }
-        if (notes) {
-          await supabase.from('money_bill_lines').insert({
-            bill_id: data.id,
-            description: notes,
-            qty: 1,
-            unit_bdt: totalBdt,
-          })
-        }
+        await supabase.from('money_bill_lines').insert({
+          bill_id: data.id,
+          description: notes,
+          qty: 1,
+          unit_bdt: totalBdt,
+        })
         void userId
         return { ok: true, billId: data.id, path: '/app/money' }
       },
@@ -437,7 +504,7 @@ export function moneyAssistantTools(
 
     remind_invoice: tool({
       description:
-        'Queue a soft reminder activity for an invoice (does not send email/payment — owner reviews in Freya Activity).',
+        'Queue a soft reminder in Freya Activity for an invoice. Call only with a real invoiceId from list_invoices. If unclear which invoice, ask — do not invent an id. Waiting for owner OK — never emailed, texted, or notified. Say drafted / waiting for your OK.',
       inputSchema: z.object({
         invoiceId: z.string(),
         note: z.string().optional(),
@@ -445,6 +512,8 @@ export function moneyAssistantTools(
       execute: async ({ invoiceId, note }) => {
         const denied = denyIfNoModule(planTier, 'money')
         if (denied) return denied
+        const need = gateCreateInput('remind_invoice', { invoiceId, note })
+        if (need) return need
         const { data: inv } = await supabase
           .from('money_invoices')
           .select('id, number, total_bdt, status')
@@ -504,7 +573,7 @@ export function campaignPlannerTools(
 
     create_campaign_draft: tool({
       description:
-        'Create a draft campaign. Title must be a proper campaign name (4–8 words, Outcome · Theme) — never paste the user prompt. Goal and audience should be 1–2 mid-length sentences aligned to this business.',
+        'Create a draft campaign in Campaigns (Growth/Scale). Call only when the owner gave a real theme (title or goal). If missing, do not invent — ask. Say drafted/ready — never launched, posted, or ads are live. Title: 4–8 words Outcome · Theme, never paste the user prompt.',
       inputSchema: z.object({
         title: z
           .string()
@@ -519,6 +588,8 @@ export function campaignPlannerTools(
       execute: async (input) => {
         const denied = denyIfNoModule(planTier, 'campaigns')
         if (denied) return denied
+        const need = gateCreateInput('create_campaign_draft', input as Record<string, unknown>)
+        if (need) return need
         const { data, error } = await supabase
           .from('campaigns')
           .insert({
@@ -547,7 +618,8 @@ export function campaignPlannerTools(
     }),
 
     update_campaign_status: tool({
-      description: 'Update campaign status to draft or paused (safe). Do not set running/live ads from chat.',
+      description:
+        'Update campaign status to draft or paused (safe). Call only with a real campaignId from list_campaigns. If unclear which campaign, ask — do not invent an id. Do not set running/live ads from chat.',
       inputSchema: z.object({
         campaignId: z.string(),
         status: z.enum(['draft', 'paused']),
@@ -555,6 +627,8 @@ export function campaignPlannerTools(
       execute: async ({ campaignId, status }) => {
         const denied = denyIfNoModule(planTier, 'campaigns')
         if (denied) return denied
+        const need = gateCreateInput('update_campaign_status', { campaignId, status })
+        if (need) return need
         const { data, error } = await supabase
           .from('campaigns')
           .update({ status })

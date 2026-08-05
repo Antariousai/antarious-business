@@ -1,6 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, GripHorizontal, MessageCircle, Send, X } from 'lucide-react'
+import {
+  Activity,
+  GripHorizontal,
+  History,
+  MessageCircle,
+  Pencil,
+  SquarePen,
+  Send,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { FreyaAvatar } from './FreyaAvatar'
 import { FreyaActivityFeed } from './FreyaActivityFeed'
 import { useFreyaActivity } from '../context/FreyaActivityContext'
@@ -22,6 +32,19 @@ import {
   type FreyaRefreshModule,
 } from '@/lib/backend/freyaChat'
 import { rememberUser } from '@/lib/rememberedUser'
+import {
+  deleteChat,
+  formatThreadTime,
+  loadFreyaChatStore,
+  renameChat,
+  saveFreyaChatStore,
+  startNewChat,
+  switchChat,
+  threadHasUserContent,
+  upsertActiveThread,
+  type FreyaChatStore,
+  type FreyaStoredMsg,
+} from '@/lib/freyaChatThreads'
 
 type ChatMsg = {
   id: string
@@ -46,8 +69,6 @@ const SUGGESTION_CHIPS: { label: string; module: AppModule | null }[] = [
 
 const FAB_POS_KEY = 'antarious-freya-fab-pos-v1'
 const PANEL_SIZE_KEY = 'antarious-freya-panel-size-v1'
-const CHAT_KEY_PREFIX = 'antarious-freya-chat-v1'
-const MAX_STORED_MSGS = 80
 /** Solid circular Freya button */
 const FAB_SIZE = 60
 const FAB_SIZE_STARTER = 64
@@ -61,10 +82,6 @@ type FabPos = { x: number; y: number }
 type PanelSize = { w: number; h: number }
 type PanelGeom = { x: number; y: number; w: number; h: number }
 
-function chatStorageKey(organizationId: string | null) {
-  return `${CHAT_KEY_PREFIX}:${organizationId || 'local'}`
-}
-
 function openerMessage(owner: string, biz: string, people: string, canCampaigns: boolean): ChatMsg {
   const extras = canCampaigns
     ? `create a lead, draft an invoice, or plan a campaign for ${biz}`
@@ -76,48 +93,28 @@ function openerMessage(owner: string, biz: string, people: string, canCampaigns:
   }
 }
 
-function loadChatMessages(
-  organizationId: string | null,
-  opener: ChatMsg,
-): ChatMsg[] {
-  try {
-    const raw = localStorage.getItem(chatStorageKey(organizationId))
-    if (!raw) return [opener]
-    const parsed = JSON.parse(raw) as ChatMsg[]
-    if (!Array.isArray(parsed) || !parsed.length) return [opener]
-    const cleaned = parsed
-      .filter(
-        (m) =>
-          m &&
-          typeof m.id === 'string' &&
-          (m.role === 'freya' || m.role === 'you') &&
-          typeof m.text === 'string',
-      )
-      .map((m) => ({
-        ...m,
-        working: false,
-        status: undefined,
-        cards: Array.isArray(m.cards) ? m.cards : undefined,
-        followUp: typeof m.followUp === 'string' ? m.followUp : undefined,
-      }))
-      .filter((m) => m.text.trim().length > 0 || (m.cards && m.cards.length > 0) || m.followUp)
-    if (!cleaned.length) return [opener]
-    return cleaned.slice(-MAX_STORED_MSGS)
-  } catch {
-    return [opener]
-  }
+function toStoredMessages(messages: ChatMsg[]): FreyaStoredMsg[] {
+  return messages
+    .filter((m) => !m.working && (m.text?.trim() || m.cards?.length || m.followUp))
+    .map(({ working: _w, status: _s, ...rest }) => ({
+      id: rest.id,
+      role: rest.role,
+      text: rest.text,
+      cards: rest.cards,
+      followUp: rest.followUp,
+    }))
 }
 
-function saveChatMessages(organizationId: string | null, messages: ChatMsg[]) {
-  try {
-    const slim = messages
-      .filter((m) => !m.working && (m.text?.trim() || m.cards?.length || m.followUp))
-      .map(({ working: _w, status: _s, ...rest }) => rest)
-      .slice(-MAX_STORED_MSGS)
-    localStorage.setItem(chatStorageKey(organizationId), JSON.stringify(slim))
-  } catch {
-    /* quota / private mode */
-  }
+function fromStoredMessages(stored: FreyaStoredMsg[]): ChatMsg[] {
+  return stored.map((m) => ({
+    id: m.id,
+    role: m.role,
+    text: m.text,
+    cards: Array.isArray(m.cards) ? (m.cards as FreyaOutputCard[]) : undefined,
+    followUp: m.followUp,
+    working: false,
+    status: undefined,
+  }))
 }
 
 function fabSize(starter: boolean) {
@@ -344,9 +341,14 @@ export function AskFreya() {
   ).map((c) => c.label)
 
   const chatKeyRef = useRef<string | null>(null)
+  const chatStoreRef = useRef<FreyaChatStore | null>(null)
+  const [chatStore, setChatStore] = useState<FreyaChatStore | null>(null)
   const [messages, setMessages] = useState<ChatMsg[]>(() => [
     openerMessage(owner, biz, people, canAccessModule(planTier, 'campaigns')),
   ])
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
@@ -385,20 +387,117 @@ export function AskFreya() {
     originY: number
   } | null>(null)
 
-  // Load persisted chat once org (or local demo) is known.
+  // Load persisted chat threads once org (or local demo) is known.
   useEffect(() => {
     if (!hydrated) return
-    const key = chatStorageKey(organizationId)
+    const key = `org:${organizationId || 'local'}`
     if (chatKeyRef.current === key) return
     chatKeyRef.current = key
     const opener = openerMessage(owner, biz, people, canAccess('campaigns'))
-    setMessages(loadChatMessages(organizationId, opener))
+    const store = loadFreyaChatStore(organizationId, opener)
+    chatStoreRef.current = store
+    setChatStore(store)
+    const active = store.threads.find((t) => t.id === store.activeId) || store.threads[0]
+    setMessages(fromStoredMessages(active.messages))
+    setHistoryOpen(false)
   }, [hydrated, organizationId, owner, biz, people, canAccess])
 
   useEffect(() => {
     if (!hydrated || !chatKeyRef.current) return
-    saveChatMessages(organizationId, messages)
+    const store = chatStoreRef.current
+    if (!store) return
+    const slim = toStoredMessages(messages)
+    const cur = store.threads.find((t) => t.id === store.activeId)
+    if (cur && JSON.stringify(cur.messages) === JSON.stringify(slim)) return
+    const next = upsertActiveThread(store, slim)
+    chatStoreRef.current = next
+    saveFreyaChatStore(organizationId, next)
+    setChatStore(next)
   }, [messages, organizationId, hydrated])
+
+  function makeOpener() {
+    return openerMessage(owner, biz, people, canAccess('campaigns'))
+  }
+
+  function commitStore(next: FreyaChatStore) {
+    chatStoreRef.current = next
+    saveFreyaChatStore(organizationId, next)
+    setChatStore(next)
+  }
+
+  function onNewChat() {
+    if (sending) return
+    abortRef.current?.abort()
+    const opener = makeOpener()
+    const base = chatStoreRef.current || loadFreyaChatStore(organizationId, opener)
+    const withMsgs = upsertActiveThread(base, toStoredMessages(messages))
+    const next = startNewChat(withMsgs, opener)
+    commitStore(next)
+    setMessages(fromStoredMessages(next.threads.find((t) => t.id === next.activeId)!.messages))
+    setHistoryOpen(false)
+    setDraft('')
+    setPanelTab('chat')
+  }
+
+  function onSelectThread(threadId: string) {
+    if (sending || !chatStoreRef.current || threadId === chatStoreRef.current.activeId) {
+      setHistoryOpen(false)
+      return
+    }
+    abortRef.current?.abort()
+    const withMsgs = upsertActiveThread(chatStoreRef.current, toStoredMessages(messages))
+    const next = switchChat(withMsgs, threadId)
+    commitStore(next)
+    const active = next.threads.find((t) => t.id === next.activeId)
+    if (active) setMessages(fromStoredMessages(active.messages))
+    setHistoryOpen(false)
+    setDraft('')
+    setPanelTab('chat')
+  }
+
+  function onDeleteThread(threadId: string, e: MouseEvent) {
+    e.stopPropagation()
+    if (sending) return
+    if (editingThreadId === threadId) {
+      setEditingThreadId(null)
+      setEditingTitle('')
+    }
+    const opener = makeOpener()
+    const base = chatStoreRef.current || loadFreyaChatStore(organizationId, opener)
+    const withMsgs =
+      threadId === base.activeId ? upsertActiveThread(base, toStoredMessages(messages)) : base
+    const next = deleteChat(withMsgs, threadId, opener)
+    commitStore(next)
+    if (threadId === base.activeId) {
+      const active = next.threads.find((t) => t.id === next.activeId)
+      if (active) setMessages(fromStoredMessages(active.messages))
+    }
+  }
+
+  function beginRename(threadId: string, currentTitle: string, e: MouseEvent) {
+    e.stopPropagation()
+    e.preventDefault()
+    setEditingThreadId(threadId)
+    setEditingTitle(currentTitle || '')
+  }
+
+  function commitRename(threadId: string) {
+    const opener = makeOpener()
+    const base = chatStoreRef.current || loadFreyaChatStore(organizationId, opener)
+    const next = renameChat(base, threadId, editingTitle)
+    commitStore(next)
+    setEditingThreadId(null)
+    setEditingTitle('')
+  }
+
+  function cancelRename() {
+    setEditingThreadId(null)
+    setEditingTitle('')
+  }
+
+  const historyThreads = (chatStore?.threads || [])
+    .filter((t) => threadHasUserContent(t.messages) || t.id === chatStore?.activeId)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
 
   useEffect(() => {
     setPos((p) => clampPos(p, isStarter))
@@ -864,14 +963,46 @@ export function AskFreya() {
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={closePanel}
-                className="rounded-lg p-1.5 hover:bg-white/10"
-                aria-label="Close"
+              <div
+                className="flex shrink-0 items-center gap-0.5"
+                onPointerDown={(e) => e.stopPropagation()}
               >
-                <X className="h-4 w-4" />
-              </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setHistoryOpen((v) => !v)
+                    setPanelTab('chat')
+                  }}
+                  disabled={sending}
+                  className="rounded-lg p-1.5 hover:bg-white/10 disabled:opacity-40"
+                  aria-label={historyOpen ? 'Close chat history' : 'Chat history'}
+                  title="Chat history"
+                >
+                  <History className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onNewChat()
+                  }}
+                  disabled={sending}
+                  className="rounded-lg p-1.5 hover:bg-white/10 disabled:opacity-40"
+                  aria-label="New chat"
+                  title="New chat"
+                >
+                  <SquarePen className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={closePanel}
+                  className="rounded-lg p-1.5 hover:bg-white/10"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="flex shrink-0 gap-1 border-b border-sky/10 bg-sky-soft/50 px-2 py-1.5">
@@ -908,62 +1039,168 @@ export function AskFreya() {
 
             {panelTab === 'chat' ? (
               <>
-                <div
-                  ref={listRef}
-                  className="min-h-0 flex-1 space-y-3 overflow-y-auto scrollbar-none bg-page p-4"
-                >
-                  {messages.map((m) =>
-                    m.role === 'you' ? (
-                      <div key={m.id} className="flex justify-end">
-                        <div className="max-w-[80%] rounded-2xl bg-sky px-3.5 py-2.5 text-[13px] text-white shadow-sm whitespace-pre-wrap">
-                          {m.text}
-                        </div>
-                      </div>
-                    ) : (
-                      <FreyaTurn
-                        key={m.id}
-                        message={m}
-                        onOpenPath={(path) => {
-                          if (canAccessRoute(path)) {
-                            navigate(path)
-                            closePanel()
-                          }
-                        }}
-                      />
-                    ),
-                  )}
-                  {messages.length < 3 && !sending && (
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {suggestions.map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => send(undefined, s)}
-                          disabled={sending}
-                          className="rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-sky shadow-sm ring-1 ring-sky/20 hover:bg-sky-soft disabled:opacity-50"
-                        >
-                          {s}
-                        </button>
-                      ))}
+                {historyOpen ? (
+                  <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none bg-page p-3">
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                        Previous chats
+                      </p>
+                      <button
+                        type="button"
+                        onClick={onNewChat}
+                        disabled={sending}
+                        className="inline-flex items-center gap-1 rounded-lg bg-sky px-2.5 py-1 text-[11px] font-bold text-white hover:bg-sky-bright disabled:opacity-50"
+                      >
+                        <SquarePen className="h-3 w-3" />
+                        New chat
+                      </button>
                     </div>
-                  )}
-                </div>
-                <form onSubmit={send} className="flex shrink-0 gap-2 border-t border-sky/10 bg-white p-3">
-                  <input
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    placeholder="Just say what you need…"
-                    disabled={sending}
-                    className="h-11 flex-1 rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20 disabled:opacity-60"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!draft.trim() || sending}
-                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky text-white hover:bg-sky-bright disabled:opacity-50"
+                    {historyThreads.length === 0 ? (
+                      <p className="px-1 py-6 text-center text-[13px] text-slate-500">
+                        No chats yet. Start one and it will show up here.
+                      </p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {historyThreads.map((t) => {
+                          const active = t.id === chatStore?.activeId
+                          const editing = editingThreadId === t.id
+                          return (
+                            <li key={t.id}>
+                              <div
+                                className={`group flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition ${
+                                  active
+                                    ? 'bg-sky-soft ring-1 ring-sky/25'
+                                    : 'bg-white ring-1 ring-slate-200/80 hover:bg-sky-soft/60'
+                                }`}
+                              >
+                                <MessageCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky" />
+                                <div className="min-w-0 flex-1">
+                                  {editing ? (
+                                    <input
+                                      autoFocus
+                                      value={editingTitle}
+                                      maxLength={48}
+                                      onChange={(e) => setEditingTitle(e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onKeyDown={(e) => {
+                                        e.stopPropagation()
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault()
+                                          commitRename(t.id)
+                                        } else if (e.key === 'Escape') {
+                                          e.preventDefault()
+                                          cancelRename()
+                                        }
+                                      }}
+                                      onBlur={() => commitRename(t.id)}
+                                      className="w-full rounded-md border border-sky/40 bg-white px-2 py-1 text-[13px] font-semibold text-ink outline-none focus:ring-2 focus:ring-sky/20"
+                                      aria-label="Rename chat"
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => onSelectThread(t.id)}
+                                      disabled={sending}
+                                      className="block w-full truncate text-left text-[13px] font-semibold text-ink disabled:opacity-50"
+                                    >
+                                      {t.title || 'New chat'}
+                                    </button>
+                                  )}
+                                  <span className="mt-0.5 block text-[11px] text-slate-500">
+                                    {formatThreadTime(t.updatedAt)}
+                                    {active ? ' · Current' : ''}
+                                    {t.titleCustom ? ' · Renamed' : ''}
+                                  </span>
+                                </div>
+                                <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => beginRename(t.id, t.title || 'New chat', e)}
+                                    disabled={sending || editing}
+                                    className="rounded-md p-1 text-slate-400 hover:bg-white hover:text-sky disabled:opacity-40"
+                                    aria-label="Rename chat"
+                                    title="Rename"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => onDeleteThread(t.id, e)}
+                                    disabled={sending}
+                                    className="rounded-md p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                                    aria-label="Delete chat"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </span>
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    ref={listRef}
+                    className="min-h-0 flex-1 space-y-3 overflow-y-auto scrollbar-none bg-page p-4"
                   >
-                    <Send className="h-4 w-4" />
-                  </button>
-                </form>
+                    {messages.map((m) =>
+                      m.role === 'you' ? (
+                        <div key={m.id} className="flex justify-end">
+                          <div className="max-w-[80%] rounded-2xl bg-sky px-3.5 py-2.5 text-[13px] text-white shadow-sm whitespace-pre-wrap">
+                            {m.text}
+                          </div>
+                        </div>
+                      ) : (
+                        <FreyaTurn
+                          key={m.id}
+                          message={m}
+                          onOpenPath={(path) => {
+                            if (canAccessRoute(path)) {
+                              navigate(path)
+                              closePanel()
+                            }
+                          }}
+                        />
+                      ),
+                    )}
+                    {messages.length < 3 && !sending && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {suggestions.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => send(undefined, s)}
+                            disabled={sending}
+                            className="rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-sky shadow-sm ring-1 ring-sky/20 hover:bg-sky-soft disabled:opacity-50"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!historyOpen && (
+                  <form onSubmit={send} className="flex shrink-0 gap-2 border-t border-sky/10 bg-white p-3">
+                    <input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder="Just say what you need…"
+                      disabled={sending}
+                      className="h-11 flex-1 rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20 disabled:opacity-60"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!draft.trim() || sending}
+                      className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky text-white hover:bg-sky-bright disabled:opacity-50"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </form>
+                )}
               </>
             ) : (
               <div className="min-h-0 flex-1">

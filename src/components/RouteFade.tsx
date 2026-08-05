@@ -1,18 +1,23 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 
-export function RouteFade({ children }: { children: ReactNode }) {
+/**
+ * Light page-only enter animation. Must wrap the page slot only — never the
+ * app shell (Sidebar / Ask Freya), or every nav remounts chrome.
+ */
+export function RouteFade({
+  children,
+  className = '',
+}: {
+  children: ReactNode
+  className?: string
+}) {
   const location = useLocation()
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    setVisible(false)
-    const id = requestAnimationFrame(() => setVisible(true))
-    return () => cancelAnimationFrame(id)
-  }, [location.pathname])
-
   return (
-    <div className={`route-fade ${visible ? 'route-fade-in' : ''}`} key={location.pathname}>
+    <div
+      className={`route-fade route-fade-in ${className}`.trim()}
+      key={location.pathname}
+    >
       {children}
     </div>
   )

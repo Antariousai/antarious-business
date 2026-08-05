@@ -25,6 +25,10 @@ import { asPlatform } from '@/lib/backend/mappers'
 import { apiFetch } from '@/lib/backend/api'
 import { useBackendMode } from '@/lib/backend/BackendModeContext'
 import { hasSupabaseEnv } from '@/lib/backend/mode'
+import {
+  platformsFromChannels,
+  type ConnectedChannel,
+} from '@/lib/socialPageUrl'
 
 /** Keep in sync with STEPS in FreyaTour.tsx */
 const FREYA_TOUR_LENGTH = 3
@@ -37,6 +41,8 @@ export interface FreyaPrefs {
   tone: FreyaTone
   autoApprove: boolean
   connectedPlatforms: Platform[]
+  /** Connected channels with optional public page URLs. */
+  connectedChannels: ConnectedChannel[]
   tourCompleted: boolean
   tourActive: boolean
   tourStep: number
@@ -54,6 +60,7 @@ const DEFAULT_PREFS: FreyaPrefs = {
   tone: 'warm',
   autoApprove: false,
   connectedPlatforms: [],
+  connectedChannels: [],
   tourCompleted: false,
   tourActive: false,
   tourStep: 0,
@@ -76,7 +83,9 @@ type MeResponse = {
   organizationId?: string
   profile: BusinessProfile
   onboarded: boolean
-  prefs: FreyaPrefs
+  prefs: FreyaPrefs & {
+    connectedChannels?: ConnectedChannel[]
+  }
   credits: number
   planTier: PlanTier
   billing?: BillingDemo
@@ -106,6 +115,40 @@ function normalizeBilling(billing?: Partial<BillingDemo> | null): BillingDemo {
   }
 }
 
+function normalizePrefs(raw?: Partial<FreyaPrefs> | null): FreyaPrefs {
+  const connectedChannelsRaw = Array.isArray(raw?.connectedChannels)
+    ? raw!.connectedChannels!
+    : []
+  let connectedChannels: ConnectedChannel[] = connectedChannelsRaw
+    .map((c) => {
+      const platformRaw = String((c as ConnectedChannel).platform || '').trim()
+      if (!platformRaw) return null
+      return {
+        platform: asPlatform(platformRaw),
+        pageUrl: String((c as ConnectedChannel).pageUrl || '').trim(),
+      }
+    })
+    .filter((c): c is ConnectedChannel => !!c)
+
+  const platforms = (raw?.connectedPlatforms ?? [])
+    .map((p) => String(p).trim())
+    .filter(Boolean)
+    .map((p) => asPlatform(p))
+  if (!connectedChannels.length && platforms.length) {
+    connectedChannels = platforms.map((platform) => ({ platform, pageUrl: '' }))
+  }
+
+  return {
+    ...DEFAULT_PREFS,
+    ...raw,
+    connectedChannels,
+    connectedPlatforms: connectedChannels.length
+      ? platformsFromChannels(connectedChannels)
+      : platforms,
+    tourStep: typeof raw?.tourStep === 'number' ? raw.tourStep : 0,
+  }
+}
+
 function loadState(): StoredState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem('antarious-demo-v1')
@@ -121,7 +164,7 @@ function loadState(): StoredState {
     return {
       profile: normalizeProfile(parsed.profile ?? null),
       onboarded: Boolean(parsed.onboarded),
-      prefs: { ...DEFAULT_PREFS, ...(parsed.prefs || {}) },
+      prefs: normalizePrefs(parsed.prefs),
       billing: normalizeBilling(parsed.billing),
     }
   } catch {
@@ -167,8 +210,9 @@ interface AppContextValue {
   updatePlatforms: (platforms: Platform[]) => void
   updateProfile: (patch: Partial<BusinessProfile>) => void
   updatePrefs: (patch: Partial<FreyaPrefs>) => void
-  connectPlatform: (platform: Platform) => void
+  connectPlatform: (platform: Platform, pageUrl?: string) => void
   disconnectPlatform: (platform: Platform) => void
+  updateChannelPageUrl: (platform: Platform, pageUrl: string) => void
   startTour: () => void
   nextTourStep: () => void
   endTour: (completed?: boolean) => void
@@ -195,11 +239,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setProfile(nextProfile)
     setOrganizationId(me.organizationId ?? null)
     setOnboarded(me.onboarded)
-    setPrefs({
-      ...DEFAULT_PREFS,
-      ...me.prefs,
-      connectedPlatforms: (me.prefs.connectedPlatforms ?? []).map((p) => asPlatform(p)),
-    })
+    setPrefs(normalizePrefs(me.prefs))
     setServerCredits(me.credits)
     setBilling(
       normalizeBilling(
@@ -317,13 +357,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })
         setProfile(normalizeProfile({ ownerName, ...data, planTier: data.planTier ?? 'starter' }))
         setOnboarded(true)
-        setPrefs((p) => ({
-          ...p,
-          connectedPlatforms: [],
-          tourCompleted: false,
-          tourActive: true,
-          tourStep: 0,
-        }))
+        setPrefs((p) =>
+          normalizePrefs({
+            ...p,
+            connectedPlatforms: [],
+            connectedChannels: [],
+            tourCompleted: false,
+            tourActive: true,
+            tourStep: 0,
+          }),
+        )
         return
       }
       persist({
@@ -333,13 +376,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           planTier: data.planTier ?? 'starter',
         },
         onboarded: true,
-        prefs: {
+        prefs: normalizePrefs({
           ...prefs,
           connectedPlatforms: [],
+          connectedChannels: [],
           tourCompleted: false,
           tourActive: true,
           tourStep: 0,
-        },
+        }),
         billing,
       })
     },
@@ -523,19 +567,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const connectPlatform = useCallback(
-    (platform: Platform) => {
+    (platform: Platform, pageUrl = '') => {
       if (prefs.connectedPlatforms.includes(platform)) return
-      const nextConnected = [...prefs.connectedPlatforms, platform]
+      const nextChannels: ConnectedChannel[] = [
+        ...prefs.connectedChannels.filter((c) => c.platform !== platform),
+        { platform, pageUrl: pageUrl.trim() },
+      ]
+      const nextPrefs = normalizePrefs({
+        ...prefs,
+        connectedChannels: nextChannels,
+      })
       if (backend) {
         void apiFetch('/api/me', {
           method: 'PATCH',
-          body: JSON.stringify({ connectPlatform: platform }),
+          body: JSON.stringify({ connectPlatform: platform, pageUrl: pageUrl.trim() || undefined }),
         }).then(() => hydrateFromBackend())
       }
       persist({
         profile,
         onboarded,
-        prefs: { ...prefs, connectedPlatforms: nextConnected },
+        prefs: nextPrefs,
         billing,
       })
     },
@@ -544,7 +595,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const disconnectPlatform = useCallback(
     (platform: Platform) => {
-      const nextConnected = prefs.connectedPlatforms.filter((p) => p !== platform)
+      const nextPrefs = normalizePrefs({
+        ...prefs,
+        connectedChannels: prefs.connectedChannels.filter((c) => c.platform !== platform),
+        connectedPlatforms: prefs.connectedPlatforms.filter((p) => p !== platform),
+      })
       if (backend) {
         void apiFetch('/api/me', {
           method: 'PATCH',
@@ -554,9 +609,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       persist({
         profile,
         onboarded,
-        prefs: { ...prefs, connectedPlatforms: nextConnected },
+        prefs: nextPrefs,
         billing,
       })
+    },
+    [backend, prefs, profile, onboarded, billing, persist, hydrateFromBackend],
+  )
+
+  const updateChannelPageUrl = useCallback(
+    (platform: Platform, pageUrl: string) => {
+      const nextChannels = prefs.connectedChannels.map((c) =>
+        c.platform === platform ? { ...c, pageUrl: pageUrl.trim() } : c,
+      )
+      if (!nextChannels.some((c) => c.platform === platform) && prefs.connectedPlatforms.includes(platform)) {
+        nextChannels.push({ platform, pageUrl: pageUrl.trim() })
+      }
+      const nextPrefs = normalizePrefs({ ...prefs, connectedChannels: nextChannels })
+      if (backend) {
+        void apiFetch('/api/me', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            updateChannelPageUrl: { platform, pageUrl: pageUrl.trim() },
+          }),
+        }).then(() => hydrateFromBackend())
+      }
+      persist({ profile, onboarded, prefs: nextPrefs, billing })
     },
     [backend, prefs, profile, onboarded, billing, persist, hydrateFromBackend],
   )
@@ -614,6 +691,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updatePrefs,
       connectPlatform,
       disconnectPlatform,
+      updateChannelPageUrl,
       startTour,
       nextTourStep,
       endTour,
@@ -646,6 +724,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updatePrefs,
       connectPlatform,
       disconnectPlatform,
+      updateChannelPageUrl,
       startTour,
       nextTourStep,
       endTour,

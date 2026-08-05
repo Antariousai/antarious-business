@@ -1,13 +1,15 @@
 import { createAgentUIStreamResponse } from 'ai'
 import { createClient } from '@/lib/supabase/server'
 import { requireOrgContext, jsonError } from '@/lib/org/context'
-import { getOrgPlanTier } from '@/lib/entitlements'
+import { getCreditBalance, getEntitlements, getOrgPlanTier } from '@/lib/entitlements'
 import { assertRateLimit } from '@/lib/rateLimit'
 import {
   createFreyaRouterAgent,
   hasAiKey,
   chargeAgentRun,
   recordUsageTokens,
+  checkCrisisGate,
+  latestUserTextFromMessages,
 } from '@/lib/agents'
 
 export const maxDuration = 60
@@ -16,6 +18,18 @@ export const runtime = 'nodejs'
 // Per-org cap on Freya chat turns per minute.
 const CHAT_LIMIT = 20
 const CHAT_WINDOW_MS = 60_000
+
+function countByKey(rows: { stage?: string | null; status?: string | null }[], key: 'stage' | 'status') {
+  const map = new Map<string, number>()
+  for (const row of rows) {
+    const k = String(row[key] || 'unknown')
+    map.set(k, (map.get(k) ?? 0) + 1)
+  }
+  if (map.size === 0) return 'none'
+  return [...map.entries()]
+    .map(([k, n]) => `${n} ${k}`)
+    .join(', ')
+}
 
 export async function POST(req: Request) {
   try {
@@ -47,6 +61,21 @@ export async function POST(req: Request) {
       windowMs: CHAT_WINDOW_MS,
     })
 
+    const body = await req.json()
+    const uiMessages = body.messages ?? []
+    const latestUser = latestUserTextFromMessages(uiMessages)
+    const crisis = checkCrisisGate(latestUser)
+
+    // Rule 0: short safe reply, no tools, no credit charge.
+    if (crisis.kind === 'crisis') {
+      return Response.json({
+        role: 'assistant',
+        content: crisis.reply,
+        crisis: true,
+        crisisVariant: crisis.variant,
+      })
+    }
+
     const { usageEventId } = await chargeAgentRun(supabase, {
       organizationId: ctx.organizationId,
       userId: ctx.user.id,
@@ -61,9 +90,13 @@ export async function POST(req: Request) {
       { data: goals },
       { data: channels },
       planTier,
+      creditsRemaining,
       waitingRes,
-      draftsRes,
-      inboxRes,
+      { data: postsRows },
+      { data: inboxRows },
+      { data: leadsRows },
+      { data: dealsRows },
+      { data: invoicesRows },
     ] = await Promise.all([
       supabase
         .from('business_profiles')
@@ -84,6 +117,7 @@ export async function POST(req: Request) {
         .select('platform')
         .eq('organization_id', ctx.organizationId),
       getOrgPlanTier(supabase, ctx.organizationId),
+      getCreditBalance(supabase, ctx.organizationId),
       supabase
         .from('freya_activity_items')
         .select('*', { count: 'exact', head: true })
@@ -91,15 +125,75 @@ export async function POST(req: Request) {
         .eq('status', 'waiting'),
       supabase
         .from('content_posts')
-        .select('*', { count: 'exact', head: true })
+        .select('id, title, caption, status')
         .eq('organization_id', ctx.organizationId)
-        .eq('status', 'draft'),
+        .order('created_at', { ascending: false })
+        .limit(40),
       supabase
         .from('inbox_threads')
-        .select('*', { count: 'exact', head: true })
+        .select('id, subject, contact_name, status')
         .eq('organization_id', ctx.organizationId)
-        .eq('status', 'open'),
+        .eq('status', 'open')
+        .order('last_message_at', { ascending: false })
+        .limit(8),
+      supabase
+        .from('leads')
+        .select('id, stage')
+        .eq('organization_id', ctx.organizationId)
+        .limit(200),
+      supabase
+        .from('crm_deals')
+        .select('id, stage')
+        .eq('organization_id', ctx.organizationId)
+        .limit(200),
+      supabase
+        .from('money_invoices')
+        .select('id, status, total_bdt, number')
+        .eq('organization_id', ctx.organizationId)
+        .limit(100),
     ])
+
+    const posts = postsRows ?? []
+    const draftPosts = posts.filter((p) => p.status === 'draft').length
+    const postsByStatus = countByKey(posts, 'status')
+    const recentTitles = posts
+      .slice(0, 3)
+      .map((p) => (p.title || p.caption || 'Untitled').slice(0, 40))
+      .filter(Boolean)
+    const postsSummary =
+      posts.length === 0
+        ? 'none'
+        : `${postsByStatus}${recentTitles.length ? `; recent: ${recentTitles.join(' · ')}` : ''}`
+
+    const openInbox = (inboxRows ?? []).length
+    const sampleSubjects = (inboxRows ?? [])
+      .slice(0, 3)
+      .map((t) => `${t.contact_name || 'Contact'}: ${(t.subject || 'thread').slice(0, 36)}`)
+    const messagesSummary =
+      openInbox === 0
+        ? 'none'
+        : `${openInbox} open${sampleSubjects.length ? `; ${sampleSubjects.join(' · ')}` : ''}`
+
+    const leadsSummary = countByKey(leadsRows ?? [], 'stage')
+    const dealsSummary = countByKey(dealsRows ?? [], 'stage')
+
+    const invoices = invoicesRows ?? []
+    const overdue = invoices.filter((i) => i.status === 'overdue')
+    const overdueTotal = overdue.reduce((s, i) => s + Number(i.total_bdt ?? 0), 0)
+    const moneySummary =
+      invoices.length === 0
+        ? 'none'
+        : [
+            countByKey(invoices, 'status'),
+            overdue.length
+              ? `overdue ${overdue.length} totalling ৳${overdueTotal.toLocaleString('en-BD')}`
+              : 'overdue none',
+          ].join('; ')
+
+    const waitingCount = waitingRes.count ?? 0
+    const entitlements = getEntitlements(planTier)
+    const modules = entitlements.modules.join(', ') || 'none'
+    const todayDate = new Date().toISOString().slice(0, 10)
 
     const agent = createFreyaRouterAgent(supabase, {
       organizationId: ctx.organizationId,
@@ -113,14 +207,21 @@ export async function POST(req: Request) {
         planTier,
         tone: prefs?.tone,
         ownerName: profile?.full_name,
-        waitingApprovals: waitingRes.count ?? 0,
-        draftPosts: draftsRes.count ?? 0,
-        openInbox: inboxRes.count ?? 0,
+        waitingApprovals: waitingCount,
+        draftPosts,
+        openInbox,
+        waitingApprovalsSummary: waitingCount === 0 ? 'none' : String(waitingCount),
+        postsSummary,
+        messagesSummary,
+        leadsSummary,
+        dealsSummary,
+        moneySummary,
+        availableModules: modules,
+        aiCreditsRemaining: creditsRemaining,
+        todayDate,
+        allergenPressure: crisis.allergenPressure,
       },
     })
-
-    const body = await req.json()
-    const uiMessages = body.messages ?? []
 
     let inputTokens = 0
     let outputTokens = 0

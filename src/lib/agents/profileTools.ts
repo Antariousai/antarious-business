@@ -2,6 +2,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { applyBusinessProfilePatch } from '@/lib/org/updateBusinessProfile'
+import { gateCreateInput } from './createInputPolicy'
 
 const GOAL_IDS = ['customers', 'engagement', 'leads', 'replies', 'money'] as const
 const PLATFORM_IDS = [
@@ -74,7 +75,7 @@ export function profileEditorTools(
 
     update_business_profile: tool({
       description:
-        'Update business profile fields the owner set during onboarding or Settings. Use when they mistyped the business name, industry, who they serve, their own name, team size, goals, or preferred channels. Only send fields they asked to change. Saves immediately to the database (no approval needed).',
+        'Update business profile fields the owner set during onboarding or Settings. Call only with fields the owner stated. Never invent industry or name. If nothing real was given, do not invent — ask. Saves immediately to the database (no approval needed).',
       inputSchema: z.object({
         ownerName: z.string().optional().describe('Owner’s display name'),
         businessName: z.string().optional().describe('Business / shop name'),
@@ -96,19 +97,11 @@ export function profileEditorTools(
           .describe('Replace preferred channels with this full list'),
       }),
       execute: async (input) => {
-        const hasAny =
-          input.ownerName != null ||
-          input.businessName != null ||
-          input.industry != null ||
-          input.customers != null ||
-          input.businessType != null ||
-          input.audienceServe != null ||
-          input.teamSize != null ||
-          input.goals != null ||
-          input.platforms != null
-        if (!hasAny) {
-          return { ok: false as const, error: 'No fields to update' }
-        }
+        const need = gateCreateInput(
+          'update_business_profile',
+          input as Record<string, unknown>,
+        )
+        if (need) return need
 
         try {
           const result = await applyBusinessProfilePatch(supabase, {

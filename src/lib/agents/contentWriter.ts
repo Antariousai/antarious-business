@@ -1,6 +1,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { gateCreateInput } from './createInputPolicy'
 
 export function contentWriterTools(
   supabase: SupabaseClient,
@@ -97,7 +98,7 @@ export function contentWriterTools(
 
     update_post_draft: tool({
       description:
-        'Edit an existing draft post (caption, title, tag, platforms, or schedule). Only touches drafts unless scheduling.',
+        'Edit an existing draft post (caption, title, tag, platforms, or schedule). Call only with a real postId from list_posts. If unclear which post, ask — do not invent an id. Only touches drafts unless scheduling.',
       inputSchema: z.object({
         postId: z.string(),
         caption: z.string().optional(),
@@ -110,6 +111,15 @@ export function contentWriterTools(
           .describe('ISO datetime if scheduling; leave null/omit to clear'),
       }),
       execute: async ({ postId, caption, title, tag, platforms, scheduledAt }) => {
+        const need = gateCreateInput('update_post_draft', {
+          postId,
+          caption,
+          title,
+          tag,
+          platforms,
+          scheduledAt,
+        })
+        if (need) return need
         const { data: existing } = await supabase
           .from('content_posts')
           .select('id, status')
@@ -150,19 +160,21 @@ export function contentWriterTools(
           ok: true,
           postId,
           path: '/app/content',
-          message: 'Post updated. Owner should review before publishing.',
+          message: 'Post updated. Waiting for your OK before anything is treated as published.',
         }
       },
     }),
 
     schedule_post: tool({
       description:
-        'Set a schedule time on a draft and queue publish approval. Live Meta publish still requires owner Approve in Freya Activity.',
+        'Set a schedule time on a draft and queue publish approval. Call only with a real postId from list_posts and a scheduledAt the owner stated. If missing, do not invent — ask. Say scheduled in the app / waiting for your OK — never posted, published, or it will go out automatically. Owner must Approve in Freya Activity.',
       inputSchema: z.object({
         postId: z.string(),
         scheduledAt: z.string().describe('ISO datetime when the post should go live'),
       }),
       execute: async ({ postId, scheduledAt }) => {
+        const need = gateCreateInput('schedule_post', { postId, scheduledAt })
+        if (need) return need
         const { data: post, error } = await supabase
           .from('content_posts')
           .update({
@@ -209,19 +221,23 @@ export function contentWriterTools(
           status: 'scheduled',
           pendingApproval: true,
           path: '/app/content',
-          message: 'Scheduled locally. Owner must Approve before it is treated as published.',
+          message: 'Scheduled in the app. Waiting for your OK before it is treated as published.',
         }
       },
     }),
 
     create_post_draft: tool({
       description:
-        'Save a draft post to Posts → Drafts for this business. Write a complete mid-length caption yourself (2–4 short sentences) using the business industry/customers/goals. Always call this when the owner asks you to draft a post. Returns postId so they can open it.',
+        'Save a draft post under Posts → Drafts and queue it waiting for owner OK. Call only when the owner gave a topic (or you already asked and they answered). Write a complete caption (2–4 short sentences). Pass topic when known. If missing topic, do not invent — ask. Say drafted / waiting for your OK — never posted, published, or went live.',
       inputSchema: z.object({
         caption: z
           .string()
           .min(12)
           .describe('Full post caption Freya wrote — ready for the owner to review'),
+        topic: z
+          .string()
+          .optional()
+          .describe('Subject/theme the owner asked for (grounds the caption)'),
         title: z.string().optional(),
         platforms: z
           .array(z.string())
@@ -229,7 +245,16 @@ export function contentWriterTools(
           .describe('e.g. Facebook, Instagram — defaults if omitted'),
         tag: z.string().optional(),
       }),
-      execute: async ({ caption, title, platforms, tag }) => {
+      execute: async ({ caption, topic, title, platforms, tag }) => {
+        const need = gateCreateInput('create_post_draft', {
+          caption,
+          topic,
+          title,
+          platforms,
+          tag,
+        })
+        if (need) return need
+
         const plats =
           platforms?.length && platforms.some((p) => p.trim())
             ? platforms.map((p) => p.trim()).filter(Boolean)
@@ -284,7 +309,7 @@ export function contentWriterTools(
           platforms: plats,
           path: '/app/content',
           pendingApproval: true,
-          message: 'Draft saved under Posts → Drafts. Owner should review before publishing.',
+          message: 'Draft saved under Posts → Drafts. Waiting for your OK before anything is treated as published.',
         }
       },
     }),

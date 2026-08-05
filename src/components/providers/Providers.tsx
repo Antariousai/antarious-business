@@ -13,7 +13,6 @@ import { TemplatesProvider } from '@/context/TemplatesContext'
 import { ContentProvider } from '@/context/ContentContext'
 import { FreyaActivityProvider } from '@/context/FreyaActivityContext'
 import { BackendModeProvider } from '@/lib/backend/BackendModeContext'
-import { RouteFade } from '@/components/RouteFade'
 
 function Tree({ children }: { children: ReactNode }) {
   return (
@@ -29,9 +28,7 @@ function Tree({ children }: { children: ReactNode }) {
                       <TemplatesProvider>
                         <ContentProvider>
                           <FreyaActivityProvider>
-                            <Suspense fallback={null}>
-                              <RouteFade>{children}</RouteFade>
-                            </Suspense>
+                            <Suspense fallback={null}>{children}</Suspense>
                           </FreyaActivityProvider>
                         </ContentProvider>
                       </TemplatesProvider>

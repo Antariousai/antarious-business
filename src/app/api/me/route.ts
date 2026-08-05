@@ -44,12 +44,23 @@ export async function GET() {
         .maybeSingle(),
       supabase
         .from('channel_connections')
-        .select('platform, status')
+        .select('platform, status, page_url')
         .eq('organization_id', ctx.organizationId)
         .eq('status', 'connected'),
       getCreditBalance(supabase, ctx.organizationId),
       getOrgPlanTier(supabase, ctx.organizationId),
     ])
+
+    // If page_url migration isn’t applied yet, fall back so connections still load.
+    let connectionRows = connectionsRes.data ?? []
+    if (connectionsRes.error) {
+      const fallback = await supabase
+        .from('channel_connections')
+        .select('platform, status')
+        .eq('organization_id', ctx.organizationId)
+        .eq('status', 'connected')
+      connectionRows = fallback.data ?? []
+    }
 
     const bp = bpRes.data
     const prefs = prefsRes.data
@@ -57,6 +68,14 @@ export async function GET() {
       signedBrandUrl(supabase, bp?.cover_path),
       signedBrandUrl(supabase, bp?.logo_path),
     ])
+
+    const connectedChannels = connectionRows.map((c) => ({
+      platform: c.platform,
+      pageUrl:
+        'page_url' in c && typeof (c as { page_url?: string }).page_url === 'string'
+          ? String((c as { page_url?: string }).page_url)
+          : '',
+    }))
 
     return Response.json({
       organizationId: ctx.organizationId,
@@ -82,7 +101,8 @@ export async function GET() {
       prefs: {
         tone: (prefs?.tone as 'warm' | 'professional' | 'playful') || 'warm',
         autoApprove: Boolean(prefs?.auto_approve),
-        connectedPlatforms: (connectionsRes.data ?? []).map((c) => c.platform),
+        connectedPlatforms: connectedChannels.map((c) => c.platform),
+        connectedChannels,
         tourCompleted: Boolean(prefs?.tour_completed),
         tourActive: Boolean(prefs?.tour_active),
         tourStep: prefs?.tour_step ?? 0,
@@ -147,23 +167,50 @@ export async function PATCH(req: Request) {
 
     if (body.connectPlatform) {
       const platform = String(body.connectPlatform)
-      const { error } = await supabase.from('channel_connections').upsert(
-        {
-          organization_id: ctx.organizationId,
-          platform,
-          status: 'connected',
-          connected_at: new Date().toISOString(),
-        },
-        { onConflict: 'organization_id,platform' },
-      )
+      const pageUrl =
+        typeof body.pageUrl === 'string' && body.pageUrl.trim() ? body.pageUrl.trim() : null
+      const row: Record<string, unknown> = {
+        organization_id: ctx.organizationId,
+        platform,
+        status: 'connected',
+        connected_at: new Date().toISOString(),
+      }
+      if (pageUrl) row.page_url = pageUrl
+      let { error } = await supabase
+        .from('channel_connections')
+        .upsert(row, { onConflict: 'organization_id,platform' })
+      // DB without page_url column yet
+      if (error && pageUrl) {
+        delete row.page_url
+        ;({ error } = await supabase
+          .from('channel_connections')
+          .upsert(row, { onConflict: 'organization_id,platform' }))
+      }
       if (error) throw error
+    }
+
+    if (body.updateChannelPageUrl && typeof body.updateChannelPageUrl === 'object') {
+      const platform = String(
+        (body.updateChannelPageUrl as { platform?: string }).platform || '',
+      )
+      const pageUrlRaw = (body.updateChannelPageUrl as { pageUrl?: string }).pageUrl
+      const pageUrl =
+        typeof pageUrlRaw === 'string' && pageUrlRaw.trim() ? pageUrlRaw.trim() : null
+      if (platform) {
+        const { error } = await supabase
+          .from('channel_connections')
+          .update({ page_url: pageUrl })
+          .eq('organization_id', ctx.organizationId)
+          .eq('platform', platform)
+        if (error) throw error
+      }
     }
 
     if (body.disconnectPlatform) {
       const platform = String(body.disconnectPlatform)
       await supabase
         .from('channel_connections')
-        .update({ status: 'disconnected', connected_at: null })
+        .update({ status: 'disconnected', connected_at: null, page_url: null })
         .eq('organization_id', ctx.organizationId)
         .eq('platform', platform)
     }
