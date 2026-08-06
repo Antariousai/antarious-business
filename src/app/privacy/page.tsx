@@ -203,8 +203,10 @@ const SECTIONS: { id: string; title: string; body: ReactNode }[] = [
         </ul>
         <p>
           You can update much of your profile and workspace content directly in the app.
-          For other requests, contact us using the details below. We may need to verify
-          your identity before fulfilling a request.
+          To request deletion of your account or user data, follow the steps on our{' '}
+          <Link href="/data-deletion">User Data Deletion</Link> page. For other requests,
+          contact us using the details below. We may need to verify your identity before
+          fulfilling a request.
         </p>
       </>
     ),
@@ -323,7 +325,12 @@ export default function PrivacyPage() {
         </article>
 
         <footer className="legal-page-footer">
-          <p>© {new Date().getFullYear()} Antarious · app.antarious.com</p>
+          <p>
+            © {new Date().getFullYear()} Antarious · app.antarious.com ·{' '}
+            <Link href="/terms">Terms</Link>
+            {' · '}
+            <Link href="/data-deletion">Data deletion</Link>
+          </p>
         </footer>
       </div>
     </div>

@@ -658,19 +658,39 @@ export function SettingsPage() {
       </Card>
 
       <Card className="overflow-hidden border border-sky/20 bg-gradient-to-br from-white via-white to-sky-soft/30 p-5">
-        <h3 className="text-[15px] font-bold text-ink">Privacy</h3>
+        <h3 className="text-[15px] font-bold text-ink">Legal</h3>
         <p className="mt-1 text-[13px] text-muted">
-          How Antarious and Freya handle account, workspace, and AI data.
+          Privacy, terms, and how to request deletion of your user data.
         </p>
-        <a
-          href="/privacy"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-sky-bright hover:underline"
-        >
-          Read privacy policy
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
+          <a
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-sky-bright hover:underline"
+          >
+            Privacy policy
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-sky-bright hover:underline"
+          >
+            Terms of service
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href="/data-deletion"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-sky-bright hover:underline"
+          >
+            Data deletion
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
       </Card>
     </div>
   )

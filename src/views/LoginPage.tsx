@@ -939,6 +939,10 @@ export function LoginPage() {
 
       <footer className="login-legal-footer">
         <a href="/privacy">Privacy policy</a>
+        <span aria-hidden="true"> · </span>
+        <a href="/terms">Terms of service</a>
+        <span aria-hidden="true"> · </span>
+        <a href="/data-deletion">Data deletion</a>
       </footer>
     </div>
   )
