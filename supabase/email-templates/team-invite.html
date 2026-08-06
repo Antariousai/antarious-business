@@ -1,38 +1,187 @@
-{{/*
-  Antarious / Freya — Team invitation (Resend)
+<!--
+  Antarious AI — Team invitation (reference / unused for sending)
+
+  Team invites are now sent via Supabase Auth inviteUserByEmail
+  (see supabase/email-templates/invite.html + src/lib/email/sendTeamInvite.ts).
+  This file is kept as a richer layout reference only.
+-->
+<!--
+  Antarious AI — Team invitation (Resend)
   Sent by POST /api/team/invites via src/lib/email/sendTeamInvite.ts
-  Keep in sync with buildTeamInviteHtml() for branding reference.
-  Subject: {inviter} invited you to {business} on Antarious
-*/}}
-<!DOCTYPE html>
-<html lang="en">
+  Keep buildTeamInviteHtml() in sync with this file.
+
+  Subject: {{inviterName}} invited you to {{businessName}} on Antarious
+
+  Tokens to replace at build time:
+    {{inviterName}}    e.g. "Joy Rahman"        — who sent the invite
+    {{businessName}}   e.g. "Joy's Bakery"      — the workspace name
+    {{roleLabel}}      e.g. "Editor"            — the seat's role
+    {{inviteeEmail}}   e.g. "sam@example.com"   — the address this was sent to
+    {{acceptUrl}}      absolute https URL       — the accept link
+    {{expiresInDays}}  e.g. "7"                 — invitation lifetime
+
+  All tokens must be HTML-escaped before substitution.
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>You’re invited</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="supported-color-schemes" content="light dark" />
+  <title>You&rsquo;ve been invited to {{businessName}}</title>
+  <!--[if mso]>
+  <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+  <![endif]-->
+  <style type="text/css">
+    body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+    table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
+    img{-ms-interpolation-mode:bicubic;border:0;height:auto;line-height:100%;outline:none;text-decoration:none;}
+    table{border-collapse:collapse!important;}
+    body{height:100%!important;margin:0!important;padding:0!important;width:100%!important;}
+    a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important;font-size:inherit!important;font-family:inherit!important;font-weight:inherit!important;line-height:inherit!important;}
+
+    /* Logo swaps with the client's colour scheme */
+    .logo-dark{display:none!important;width:0!important;height:0!important;max-height:0!important;overflow:hidden!important;mso-hide:all;}
+
+    @media screen and (max-width:600px){
+      .wrap{padding:20px 12px!important;}
+      .pad{padding:26px 22px 8px!important;}
+      .pad-logo{padding:22px 22px!important;}
+      .pad-foot{padding:18px 22px 24px!important;}
+      .h1{font-size:21px!important;line-height:1.3!important;}
+      .btn-a{display:block!important;width:100%!important;box-sizing:border-box!important;text-align:center!important;}
+    }
+
+    @media (prefers-color-scheme: dark){
+      .bg-page{background:#070D16!important;}
+      .bg-card{background:#101D2E!important;}
+      .bg-foot{background:#0C1826!important;}
+      .bg-box{background:#152438!important;}
+      .t-head{color:#F1F5F9!important;}
+      .t-body{color:#C3D0E0!important;}
+      .t-muted{color:#8B9DB4!important;}
+      .t-label{color:#8B9DB4!important;}
+      .brd{border-color:#24374F!important;}
+      .logo-light{display:none!important;width:0!important;height:0!important;max-height:0!important;overflow:hidden!important;}
+      .logo-dark{display:block!important;width:150px!important;height:22px!important;max-height:none!important;overflow:visible!important;}
+    }
+    [data-ogsc] .bg-page{background:#070D16!important;}
+    [data-ogsc] .bg-card{background:#101D2E!important;}
+    [data-ogsc] .bg-foot{background:#0C1826!important;}
+    [data-ogsc] .bg-box{background:#152438!important;}
+    [data-ogsc] .t-head{color:#F1F5F9!important;}
+    [data-ogsc] .t-body{color:#C3D0E0!important;}
+    [data-ogsc] .t-muted{color:#8B9DB4!important;}
+    [data-ogsc] .t-label{color:#8B9DB4!important;}
+    [data-ogsc] .brd{border-color:#24374F!important;}}
+  </style>
 </head>
-<body style="margin:0;padding:0;background:#eef6fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef6fb;padding:32px 16px;">
+<body class="bg-page" style="margin:0;padding:0;width:100%;background:#EAF1F8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{inviterName}} invited you to join {{businessName}} on Antarious.</div>
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
+
+  <table role="presentation" class="bg-page" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#EAF1F8" style="background:#EAF1F8;">
     <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:20px;overflow:hidden;">
+      <td class="wrap" align="center" style="padding:40px 16px;">
+
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="560" class="bg-card" bgcolor="#FFFFFF" style="width:560px;max-width:560px;background:#FFFFFF;border-radius:20px;overflow:hidden;box-shadow:0 20px 44px -30px rgba(11,21,36,0.38);">
+
           <tr>
-            <td style="background:linear-gradient(135deg,#0b131e 0%,#0e7490 55%,#0ea5e9 100%);padding:28px;">
-              <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;">You’re invited</h1>
-              <p style="margin:8px 0 0;font-size:14px;color:rgba(255,255,255,0.85);">Join the workspace and meet Freya.</p>
+            <td height="4" bgcolor="#0EA5E9" style="height:4px;line-height:4px;font-size:4px;background:#0EA5E9;background-image:linear-gradient(90deg,#0EA5E9 0%,#38BDF8 50%,#22D3EE 100%);">&nbsp;</td>
+          </tr>
+
+          <!-- Header -->
+          <tr>
+            <td class="pad-logo" bgcolor="#0B1524" style="background:#0B1524;padding:26px 34px;line-height:0;">
+              <a href="https://app.antarious.com" style="text-decoration:none;display:inline-block;line-height:0;">
+                <img src="https://app.antarious.com/brand/antarious-ai-logo-light.png" alt="Antarious AI" width="172" height="25" style="display:block;width:172px;height:25px;border:0;outline:none;text-decoration:none;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:18px;font-weight:700;letter-spacing:-0.3px;line-height:25px;" />
+              </a>
             </td>
           </tr>
+
+          <!-- Body -->
           <tr>
-            <td style="padding:28px;">
-              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
-                Someone on your team invited you to collaborate on Antarious. Accept with the same email this message was sent to (work or personal).
-              </p>
-              <p style="margin:0;font-size:12px;color:#94a3b8;">Runtime HTML is built in <code>src/lib/email/sendTeamInvite.ts</code>.</p>
+            <td class="pad" style="padding:32px 34px 8px;">
+
+              <h1 class="h1 t-head" style="margin:0 0 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:24px;line-height:1.28;font-weight:700;letter-spacing:-0.4px;color:#0B1524;">You&rsquo;ve been invited to {{businessName}}</h1>
+
+              <p class="t-body" style="margin:0 0 18px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:15px;line-height:1.65;color:#4A5C72;"><span class="t-head" style="color:#0B1524;font-weight:600;">{{inviterName}}</span> invited you to join their workspace on Antarious.</p>
+              <table role="presentation" class="bg-box brd" border="0" cellpadding="0" cellspacing="0" width="100%" style="background:#F5F9FD;border:1px solid #E1EAF4;border-radius:14px;margin:0 0 24px;">
+                <tr>
+                  <td style="padding:18px 20px;">
+                    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="padding:0 0 0;">
+                      <p class="t-label" style="margin:0 0 3px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.7px;text-transform:uppercase;color:#8FA3BC;">Workspace</p>
+                      <p class="t-head" style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:15px;font-weight:600;line-height:1.4;color:#0B1524;">{{businessName}}</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 0 0;">
+                      <p class="t-label" style="margin:0 0 3px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.7px;text-transform:uppercase;color:#8FA3BC;">Your role</p>
+                      <p class="t-head" style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:15px;font-weight:600;line-height:1.4;color:#0B1524;">{{roleLabel}}</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 0 0;">
+                      <p class="t-label" style="margin:0 0 3px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.7px;text-transform:uppercase;color:#8FA3BC;">Accept with this address</p>
+                      <p class="t-head" style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:15px;font-weight:600;line-height:1.4;color:#0B1524;">{{inviteeEmail}}</p>
+                    </td>
+                  </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 0 22px;">
+                <tr>
+                  <td align="left">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{acceptUrl}}" style="height:48px;v-text-anchor:middle;width:204px;" arcsize="50%" stroke="f" fillcolor="#0EA5E9">
+                      <w:anchorlock/>
+                      <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">Accept invitation</center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-- -->
+                    <a class="btn-a" href="{{acceptUrl}}" style="background:#0EA5E9;border-radius:999px;color:#ffffff;display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:15px;font-weight:700;line-height:48px;mso-line-height-rule:exactly;padding:0 30px;text-align:center;text-decoration:none;letter-spacing:-0.1px;">Accept invitation</a>
+                    <!--<![endif]-->
+                  </td>
+                </tr>
+              </table>
+
+              <p class="t-muted" style="margin:0 0 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:13px;line-height:1.55;color:#8FA3BC;">This invitation expires in {{expiresInDays}} days.</p>
+
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td class="brd" style="border-top:1px solid #E4EBF3;padding:18px 0 0;">
+                    <p class="t-muted" style="margin:0 0 5px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:12px;line-height:1.5;color:#8FA3BC;">Button not working? Paste this link into your browser:</p>
+                    <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:12px;line-height:1.5;word-break:break-all;">
+                      <a href="{{acceptUrl}}" style="color:#0284C7;text-decoration:none;word-break:break-all;">{{acceptUrl}}</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
             </td>
           </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="pad-foot bg-foot" bgcolor="#F7FAFD" style="background:#F7FAFD;padding:22px 34px 26px;">
+              <p class="t-muted" style="margin:0 0 10px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:12px;line-height:1.6;color:#8FA3BC;">Don&rsquo;t know {{inviterName}}? You can safely ignore this email.</p>
+              <p class="t-muted" style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:12px;line-height:1.6;color:#A6B6C9;">&copy; Antarious AI &middot; <a href="https://app.antarious.com" style="color:#8FA3BC;text-decoration:none;">app.antarious.com</a></p>
+            </td>
+          </tr>
+
         </table>
+
       </td>
     </tr>
   </table>
+
 </body>
 </html>

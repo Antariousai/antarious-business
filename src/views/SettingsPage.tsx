@@ -656,6 +656,22 @@ export function SettingsPage() {
           Reset Freya Activity demo
         </Button>
       </Card>
+
+      <Card className="overflow-hidden border border-sky/20 bg-gradient-to-br from-white via-white to-sky-soft/30 p-5">
+        <h3 className="text-[15px] font-bold text-ink">Privacy</h3>
+        <p className="mt-1 text-[13px] text-muted">
+          How Antarious and Freya handle account, workspace, and AI data.
+        </p>
+        <a
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-sky-bright hover:underline"
+        >
+          Read privacy policy
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      </Card>
     </div>
   )
 }

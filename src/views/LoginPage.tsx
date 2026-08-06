@@ -936,6 +936,10 @@ export function LoginPage() {
           </div>
         </section>
       </main>
+
+      <footer className="login-legal-footer">
+        <a href="/privacy">Privacy policy</a>
+      </footer>
     </div>
   )
 }

@@ -76,6 +76,7 @@ Run through this before pointing real users at the app.
 ### Environment variables (Vercel → Project → Settings → Environment Variables)
 | Var | Scope | Notes |
 |-----|-------|-------|
+| `NEXT_PUBLIC_APP_URL` | all | Production: `https://app.antarious.com`. Used for auth redirects and invite links |
 | `NEXT_PUBLIC_SUPABASE_URL` | all | Public — safe in the browser |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | all | Public anon key; RLS enforces access |
 | `SUPABASE_SERVICE_ROLE_KEY` | server only | **Never** prefix with `NEXT_PUBLIC_`. Used by `lib/supabase/admin.ts` (cron + invite accept) |
@@ -108,9 +109,16 @@ Run through this before pointing real users at the app.
 - RLS is enabled on every table. Policies are org-scoped via `is_org_member` / `can_edit_org` / `org_role`. The final migration adds the previously-missing insert policies for `ai_credit_ledger`, `ai_usage_events` (+ update), and `freya_audit_log`.
 - Sanity check after deploy: sign in as two users in different orgs and confirm neither can read the other’s data.
 
+### Domain & auth URLs
+- Vercel domain: `app.antarious.com`
+- Supabase → Authentication → URL configuration: **Site URL** `https://app.antarious.com`, redirect allowlist includes `https://app.antarious.com/auth/callback` (and confirm/reset paths you use)
+- Paste updated templates from `supabase/email-templates/` into Supabase Auth email templates if you customize them (branding links use `app.antarious.com`). Include **Invite user** (`invite.html`) for team invites.
+
 ### Team invites
-- Invites are emailed via **Resend** (`RESEND_API_KEY`, optional `RESEND_FROM`, default `Freya <invites@freya.antarious.com>`). Accept link: `/api/team/invites/accept?token=…`.
-- Invitee must sign in with the **same email** the invite was sent to (work or personal). Owners can still **Copy invite link** if email delivery is unavailable.
+- Invites are emailed via **Supabase Auth** `inviteUserByEmail` (uses your Auth SMTP — e.g. Resend). Paste the **Invite user** template from `supabase/email-templates/invite.html`.
+- App still stores a `team_invitations` row (org + role). After the invitee confirms, `/auth/confirm` sends them to `/api/team/invites/accept?token=…`.
+- If that email already has an account, Auth won’t send a new invite email — use **Copy invite link** instead.
+- Invitee must sign in / accept with the **same email** the invite was sent to.
 
 ## Key paths
 | Area | Path |

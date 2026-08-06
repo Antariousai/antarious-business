@@ -268,7 +268,7 @@ export function TeamPage() {
           {seats.length} of {seatLimit} seats used
           {atCap ? ` · next invite adds a seat at ${formatBdt(SEAT_PRICE_MONTHLY)}/mo` : ''}
           {backend
-            ? ' · invite email comes from Freya (invites@freya.antarious.com).'
+            ? ' · invite email is sent through Supabase Auth (your SMTP / Resend). Existing accounts: copy the invite link.'
             : ' (demo — no real invites sent).'}
         </p>
       </Card>

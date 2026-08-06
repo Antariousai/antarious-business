@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
   }
 
   const email = data.user?.email?.trim() || ''
+  const redirectToRaw = searchParams.get('redirect_to')
 
   if (type === 'signup' || type === 'email') {
     await supabase.auth.signOut()
@@ -59,6 +60,25 @@ export async function GET(request: NextRequest) {
   } else if (type === 'recovery') {
     // Keep recovery session so the user can set a new password.
     destination = `${origin}${next || '/auth/reset-password'}`
+  } else if (type === 'invite') {
+    // Team invites stash the org invite token in user metadata at send time.
+    const meta = data.user?.user_metadata as Record<string, unknown> | undefined
+    const teamToken =
+      typeof meta?.team_invite_token === 'string' ? meta.team_invite_token.trim() : ''
+    if (teamToken) {
+      destination = `${origin}/api/team/invites/accept?token=${encodeURIComponent(teamToken)}`
+    } else if (redirectToRaw) {
+      try {
+        const target = new URL(redirectToRaw)
+        if (target.origin === origin) destination = target.toString()
+      } catch {
+        /* ignore invalid redirect_to */
+      }
+    } else if (next) {
+      destination = `${origin}${next}`
+    } else {
+      destination = `${origin}/onboarding`
+    }
   } else if (next) {
     destination = `${origin}${next}`
   } else {
