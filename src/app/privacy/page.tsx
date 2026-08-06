@@ -270,7 +270,7 @@ const SECTIONS: { id: string; title: string; body: ReactNode }[] = [
       <>
         <p>
           Questions about privacy or this policy:{' '}
-          <a href="mailto:invites@freya.antarious.com">invites@freya.antarious.com</a>
+          <a href="mailto:request@antarious.com">request@antarious.com</a>
           {' '}
           or visit{' '}
           <a href="https://app.antarious.com">app.antarious.com</a>.

@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 }
 
 const LAST_UPDATED = '7 August 2026'
-const DELETION_EMAIL = 'invites@freya.antarious.com'
+const DELETION_EMAIL = 'request@antarious.com'
 
 const SECTIONS: { id: string; title: string; body: ReactNode }[] = [
   {
