@@ -27,5 +27,6 @@ export {
   denyIfNoModule,
 } from './specialists'
 export { profileEditorTools } from './profileTools'
+export { productKnowledgeTools } from './productKnowledgeTools'
 export { discoverAgentTools } from './discoverAgent'
 export { chargeAgentRun, recordUsageTokens } from './usage'

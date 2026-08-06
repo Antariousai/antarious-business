@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { freyaSystemPrompt, freyaWritingRules } from '../persona'
+import { freyaSystemPromptV2 } from '../freyaSystemPromptV2'
 import { FREYA_PERSONA } from '@/data/freyaPersona'
 
 describe('freyaSystemPrompt Part 18 snapshot', () => {
@@ -74,5 +75,23 @@ describe('freyaSystemPrompt Part 18 snapshot', () => {
     expect(rules).toMatch(/Length ladder/)
     expect(rules).toMatch(/never in owner-facing/i)
     expect(rules).toMatch(/no markdown headers/i)
+  })
+})
+
+describe('freyaSystemPromptV2 product knowledge', () => {
+  it('includes product spine and lookup_product_knowledge', () => {
+    const prompt = freyaSystemPromptV2({
+      businessName: 'Joy Bakery',
+      industry: 'bakery',
+      ownerName: 'Kamrul',
+      planTier: 'starter',
+      availableModules: 'today, posts',
+      aiCreditsRemaining: 10,
+      todayDate: '2026-08-06',
+    })
+    expect(prompt).toContain('## Antarious product spine')
+    expect(prompt).toContain('lookup_product_knowledge')
+    expect(prompt).toMatch(/Credit Score/)
+    expect(prompt).toMatch(/do not invent/i)
   })
 })

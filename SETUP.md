@@ -51,6 +51,19 @@ Or call `POST /api/demo/seed` from the browser while signed in.
 ## 5. Freya agents
 Set `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY`. Without a key, `POST /api/freya/chat` returns a JSON offline stub so the UI still wires up. Demo mode never calls the chat API.
 
+## 5b. Freya product knowledge (Supabase Vector)
+Official Antarious Business / Credit Score / Finance facts live in `docs/knowledge/Antarious_Freya_Training_Knowledge.md` and are embedded into `freya_knowledge_chunks` (pgvector). Freya calls `lookup_product_knowledge` at chat time.
+
+1. Apply migration `supabase/migrations/20260806120000_freya_knowledge_vectors.sql` (`npx supabase db push` or SQL editor).
+2. Ensure `OPENAI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` are in `.env.local`.
+3. Ingest (re-run after editing the markdown):
+
+```bash
+npm run knowledge:ingest
+```
+
+Re-ingest deletes and replaces rows for source `antarious_training_knowledge_v1` only.
+
 ## 6. Deploy (Vercel)
 - Import the repo, set the same env vars
 - Remove any SPA rewrite leftovers (this repo’s `vercel.json` only defines cron)
@@ -70,10 +83,9 @@ Run through this before pointing real users at the app.
 | `CRON_SECRET` | server only | Required — `/api/cron/daily` rejects requests without `Authorization: Bearer $CRON_SECRET` |
 
 ### Migrations
-- Apply **both** migration files in order:
-  1. `supabase/migrations/20260726120000_init.sql`
-  2. `supabase/migrations/20260726130000_mvp_final.sql` (money reconcile/ledger/cashflow, discover trends, credit/usage/audit insert policies)
+- Apply migrations in order under `supabase/migrations/` (init → mvp_final → later feature files, including `20260806120000_freya_knowledge_vectors.sql` for Freya product RAG).
 - `npx supabase db push` (linked) applies anything unapplied.
+- After knowledge migration: `npm run knowledge:ingest` (see §5b).
 - Regenerate types after schema changes: `npm run db:types`.
 
 ### Cron (`vercel.json`)
@@ -108,6 +120,7 @@ Run through this before pointing real users at the app.
 | Backend mode | `src/lib/backend/` |
 | Entitlements | `src/lib/entitlements.ts` |
 | Freya agents | `src/lib/agents/` |
+| Freya product knowledge | `docs/knowledge/`, `src/lib/knowledge/`, `scripts/ingest-freya-knowledge.ts` |
 | APIs | `src/app/api/**` |
 | UI routes | `src/app/(app)/app/**` |
 | Page components | `src/views/**` |

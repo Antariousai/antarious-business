@@ -11,6 +11,7 @@ import {
   campaignPlannerTools,
 } from './specialists'
 import { profileEditorTools } from './profileTools'
+import { productKnowledgeTools } from './productKnowledgeTools'
 
 export function freyaRouterTools(
   supabase: SupabaseClient,
@@ -25,6 +26,7 @@ export function freyaRouterTools(
   const money = moneyAssistantTools(supabase, organizationId, userId, planTier)
   const campaigns = campaignPlannerTools(supabase, organizationId, userId, planTier)
   const profile = profileEditorTools(supabase, organizationId, userId)
+  const knowledge = productKnowledgeTools()
 
   return {
     ...content,
@@ -34,6 +36,7 @@ export function freyaRouterTools(
     ...money,
     ...campaigns,
     ...profile,
+    ...knowledge,
 
     workspace_status: tool({
       description:

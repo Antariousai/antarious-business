@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "oxlint",
-    "test:freya": "vitest run src/lib/agents/__tests__ --pool=forks --poolOptions.forks.singleFork=true",
+    "test:freya": "vitest run src/lib/agents/__tests__ src/lib/knowledge/__tests__ --pool=forks --poolOptions.forks.singleFork=true",
+    "knowledge:ingest": "tsx scripts/ingest-freya-knowledge.ts",
     "build:freya-gifs": "python scripts/build-freya-gifs.py",
     "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
     "db:reset": "supabase db reset"
@@ -32,6 +33,7 @@
     "oxlint": "^1.71.0",
     "postcss": "^8.5.0",
     "tailwindcss": "^4.3.2",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.7"
   }
