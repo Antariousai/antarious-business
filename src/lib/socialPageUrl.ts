@@ -3,6 +3,9 @@ import type { Platform } from '@/data/mockData'
 export type ConnectedChannel = {
   platform: Platform
   pageUrl: string
+  pageName?: string
+  provider?: string
+  connectedViaMeta?: boolean
 }
 
 /** Ensure https:// and a parseable URL. Returns null if empty/invalid. */

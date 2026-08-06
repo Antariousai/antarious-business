@@ -81,10 +81,25 @@ Run through this before pointing real users at the app.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | all | Public anon key; RLS enforces access |
 | `SUPABASE_SERVICE_ROLE_KEY` | server only | **Never** prefix with `NEXT_PUBLIC_`. Used by `lib/supabase/admin.ts` (cron + invite accept) |
 | `OPENAI_API_KEY` *or* `AI_GATEWAY_API_KEY` | server only | Without a key, Freya chat returns an offline stub |
+| `META_APP_ID` / `META_APP_SECRET` | server only | Meta app credentials for Settings → Connect with Meta |
 | `CRON_SECRET` | server only | Required — `/api/cron/daily` rejects requests without `Authorization: Bearer $CRON_SECRET` |
 
+### Meta Page OAuth (Facebook / Instagram / Messenger)
+1. Create the app at [developers.facebook.com/apps](https://developers.facebook.com/apps) (not `dev.meta.ai`).
+2. Customize use cases: **Page**, **Instagram**, **Messenger** (ads optional — skip for Freya).
+3. **Facebook Login** → Valid OAuth Redirect URIs:
+   - `https://app.antarious.com/api/meta/oauth/callback`
+   - `http://localhost:3000/api/meta/oauth/callback` (local)
+4. **App settings → Basic**: App domains `app.antarious.com`, privacy URL, icon.
+5. Put `META_APP_ID`, `META_APP_SECRET`, and `NEXT_PUBLIC_APP_URL=https://app.antarious.com` in Vercel (+ `.env.local` for local).
+6. Apply migration `20260807010000_channel_meta_oauth.sql`.
+7. In Development mode, add yourself as app Tester/Admin and use a Page you admin (IG Professional linked for Instagram).
+8. Test: sign in at `https://app.antarious.com` → **Settings** → **Connect with Meta**.
+
+Publish / inbox webhooks are separate follow-ups; connect stores encrypted Page tokens in `channel_connections` for later Graph calls.
+
 ### Migrations
-- Apply migrations in order under `supabase/migrations/` (init → mvp_final → later feature files, including `20260806120000_freya_knowledge_vectors.sql` for Freya product RAG).
+- Apply migrations in order under `supabase/migrations/` (init → mvp_final → later feature files, including knowledge + `20260807010000_channel_meta_oauth.sql`).
 - `npx supabase db push` (linked) applies anything unapplied.
 - After knowledge migration: `npm run knowledge:ingest` (see §5b).
 - Regenerate types after schema changes: `npm run db:types`.
@@ -109,10 +124,21 @@ Run through this before pointing real users at the app.
 - RLS is enabled on every table. Policies are org-scoped via `is_org_member` / `can_edit_org` / `org_role`. The final migration adds the previously-missing insert policies for `ai_credit_ledger`, `ai_usage_events` (+ update), and `freya_audit_log`.
 - Sanity check after deploy: sign in as two users in different orgs and confirm neither can read the other’s data.
 
-### Domain & auth URLs
-- Vercel domain: `app.antarious.com`
-- Supabase → Authentication → URL configuration: **Site URL** `https://app.antarious.com`, redirect allowlist includes `https://app.antarious.com/auth/callback` (and confirm/reset paths you use)
-- Paste updated templates from `supabase/email-templates/` into Supabase Auth email templates if you customize them (branding links use `app.antarious.com`). Include **Invite user** (`invite.html`) for team invites.
+### Domain & auth URLs (Supabase vs Meta — different products)
+**Supabase Auth** (login / signup / password reset / invites) — **Authentication → URL configuration**:
+- **Site URL:** `https://app.antarious.com`
+- **Redirect URLs allowlist** (add each):
+  - `https://app.antarious.com/**` (or at least the paths below)
+  - `https://app.antarious.com/auth/callback`
+  - `https://app.antarious.com/auth/confirm`
+  - `https://app.antarious.com/auth/reset-password`
+  - `http://localhost:3000/**` for local
+
+Do **not** put the Meta OAuth callback into Supabase redirect URLs. Supabase never sees Meta’s `code`.
+
+**Meta Facebook Login** — Valid OAuth Redirect URIs (Meta App Dashboard only):
+- `https://app.antarious.com/api/meta/oauth/callback`
+- `http://localhost:3000/api/meta/oauth/callback`
 
 ### Team invites
 - Invites are emailed via **Supabase Auth** `inviteUserByEmail` (uses your Auth SMTP — e.g. Resend). Paste the **Invite user** template from `supabase/email-templates/invite.html`.

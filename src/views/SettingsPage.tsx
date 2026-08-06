@@ -25,6 +25,7 @@ import {
   type PlanTier,
 } from '../data/planTiers'
 import { normalizeSocialPageUrl } from '@/lib/socialPageUrl'
+import { useBackendMode } from '@/lib/backend/BackendModeContext'
 
 const TONES: { id: FreyaTone; label: string; blurb: string; accent: string }[] = [
   {
@@ -76,13 +77,21 @@ export function SettingsPage() {
     disconnectPlatform,
     updateChannelPageUrl,
     startTour,
+    hydrateFromBackend,
   } = useApp()
+  const { backend } = useBackendMode()
   const { resetDemo } = useFreyaActivity()
   const [saved, setSaved] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
+  const [connectInfo, setConnectInfo] = useState<string | null>(null)
   const [pendingConnect, setPendingConnect] = useState<Platform | null>(null)
   const [pageUrlDraft, setPageUrlDraft] = useState('')
   const [editingUrlFor, setEditingUrlFor] = useState<Platform | null>(null)
+  const [metaEnabled, setMetaEnabled] = useState(false)
+  const [metaPages, setMetaPages] = useState<
+    { id: string; name: string; pageUrl: string; igUsername: string | null; hasInstagram: boolean }[]
+  >([])
+  const [pickingPage, setPickingPage] = useState(false)
   const [profileDraft, setProfileDraft] = useState({
     ownerName: '',
     businessName: '',
@@ -96,6 +105,7 @@ export function SettingsPage() {
   const monthlyEstimate = estimateMonthlyTotal(planTier, seatLimit)
   const connectedCount = prefs.connectedPlatforms.length
   const channelLimit = entitlements.maxChannels
+  const META_PLATFORMS: Platform[] = ['Facebook', 'Instagram', 'Messenger']
 
   useEffect(() => {
     if (!profile) return
@@ -107,6 +117,62 @@ export function SettingsPage() {
     })
     setProfileDirty(false)
   }, [profile])
+
+  useEffect(() => {
+    if (!backend) return
+    void fetch('/api/meta/status')
+      .then((r) => r.json())
+      .then((j: { enabled?: boolean }) => setMetaEnabled(Boolean(j.enabled)))
+      .catch(() => setMetaEnabled(false))
+  }, [backend])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const qs = new URLSearchParams(window.location.search)
+    const meta = qs.get('meta')
+    if (!meta) return
+
+    const cleanUrl = () => {
+      const url = new URL(window.location.href)
+      ;['meta', 'message', 'page', 'platforms'].forEach((k) => url.searchParams.delete(k))
+      window.history.replaceState({}, '', url.pathname + url.search)
+    }
+
+    if (meta === 'connected') {
+      const page = qs.get('page')
+      setConnectInfo(
+        page
+          ? `Connected ${page} via Meta. Facebook/Messenger${qs.get('platforms')?.includes('Instagram') ? ' and Instagram' : ''} are linked.`
+          : 'Meta Page connected.',
+      )
+      setConnectError(null)
+      void hydrateFromBackend?.()
+      cleanUrl()
+      flashSaved()
+    } else if (meta === 'error') {
+      setConnectError(qs.get('message') || 'Meta connect failed')
+      setConnectInfo(null)
+      cleanUrl()
+    } else if (meta === 'pick') {
+      setConnectInfo('Choose which Facebook Page to connect.')
+      setPickingPage(true)
+      void fetch('/api/meta/oauth/pages')
+        .then((r) => r.json())
+        .then((j: { pages?: typeof metaPages }) => {
+          setMetaPages(j.pages ?? [])
+          if (!(j.pages ?? []).length) {
+            setConnectError('Page list expired. Click Connect and try again.')
+            setPickingPage(false)
+          }
+        })
+        .catch(() => {
+          setConnectError('Could not load Pages to pick.')
+          setPickingPage(false)
+        })
+      cleanUrl()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- flashSaved is stable enough for return banner
+  }, [backend, hydrateFromBackend])
 
   if (!profile) return null
 
@@ -144,15 +210,50 @@ export function SettingsPage() {
 
   function handleConnect(p: Platform) {
     setConnectError(null)
+    setConnectInfo(null)
     if (connectedCount >= channelLimit) {
       setConnectError(
         `Your ${entitlements.label} plan allows ${channelLimit} connected channel${channelLimit === 1 ? '' : 's'}. Upgrade or disconnect one first.`,
       )
       return
     }
+
+    // Real Meta OAuth for FB / IG / Messenger when configured
+    if (backend && metaEnabled && META_PLATFORMS.includes(p)) {
+      window.location.href = `/api/meta/oauth/start?platform=${encodeURIComponent(p)}`
+      return
+    }
+
     setPendingConnect(p)
     setPageUrlDraft('')
     setEditingUrlFor(null)
+  }
+
+  async function chooseMetaPage(pageId: string) {
+    setConnectError(null)
+    try {
+      const res = await fetch('/api/meta/oauth/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageId }),
+      })
+      const json = (await res.json()) as { error?: string; pageName?: string; platforms?: string[] }
+      if (!res.ok) {
+        setConnectError(json.error || 'Could not finish Meta connect')
+        return
+      }
+      setPickingPage(false)
+      setMetaPages([])
+      setConnectInfo(
+        json.pageName
+          ? `Connected ${json.pageName} via Meta.`
+          : 'Meta Page connected.',
+      )
+      await hydrateFromBackend()
+      flashSaved()
+    } catch {
+      setConnectError('Could not finish Meta connect')
+    }
   }
 
   function confirmConnect() {
@@ -428,16 +529,51 @@ export function SettingsPage() {
       <Card className="overflow-hidden p-5">
         <h3 className="text-[15px] font-bold text-ink">Connect platforms</h3>
         <p className="mt-1 text-[13px] text-muted">
-          Connect at least one channel to publish or schedule posts. Until then, new posts stay as
-          drafts. Demo connect — no real OAuth yet.
+          {backend && metaEnabled
+            ? 'Facebook, Instagram, and Messenger connect through Meta (real Page OAuth). WhatsApp still uses a manual URL for now.'
+            : 'Connect at least one channel to publish or schedule posts. Until then, new posts stay as drafts. Meta OAuth is off until META_APP_ID / META_APP_SECRET are set.'}
         </p>
         <p className="mt-2 text-[12px] font-semibold text-sky">
           {connectedCount}/{channelLimit} channels connected on {entitlements.label}
         </p>
+        {connectInfo && (
+          <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-800">
+            {connectInfo}
+          </p>
+        )}
         {connectError && (
           <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-800">
             {connectError}
           </p>
+        )}
+        {pickingPage && metaPages.length > 0 && (
+          <div className="mt-3 space-y-2 rounded-xl border border-sky/20 bg-sky-soft/30 p-3">
+            <p className="text-[13px] font-bold text-ink">Pick a Facebook Page</p>
+            <p className="text-[12px] text-muted">
+              Linked Instagram (if any) and Messenger attach with the same Page.
+            </p>
+            <ul className="space-y-2">
+              {metaPages.map((page) => (
+                <li key={page.id}>
+                  <button
+                    type="button"
+                    onClick={() => void chooseMetaPage(page.id)}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl bg-white px-3 py-2.5 text-left text-[13px] font-semibold text-ink ring-1 ring-sky/15 hover:bg-sky-soft/40"
+                  >
+                    <span className="min-w-0 truncate">
+                      {page.name}
+                      {page.hasInstagram && page.igUsername
+                        ? ` · @${page.igUsername}`
+                        : page.hasInstagram
+                          ? ' · Instagram linked'
+                          : ''}
+                    </span>
+                    <span className="shrink-0 text-sky">Connect</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {connectedCount === 0 && (
           <p className="mt-2 rounded-xl border border-sky/20 bg-sky-soft/40 px-3 py-2 text-[12px] text-sky-bright">
@@ -449,8 +585,11 @@ export function SettingsPage() {
             const connected = prefs.connectedPlatforms.includes(p)
             const channel = prefs.connectedChannels.find((c) => c.platform === p)
             const pageUrl = channel?.pageUrl || ''
+            const pageName = channel?.pageName || ''
+            const viaMeta = Boolean(channel?.connectedViaMeta || channel?.provider === 'meta')
             const isPending = pendingConnect === p
             const isEditingUrl = editingUrlFor === p
+            const usesMetaOAuth = backend && metaEnabled && META_PLATFORMS.includes(p)
             return (
               <li
                 key={p}
@@ -471,10 +610,14 @@ export function SettingsPage() {
                         className={`truncate text-[12px] ${connected ? 'font-semibold text-emerald-600' : 'text-muted'}`}
                       >
                         {connected
-                          ? pageUrl
-                            ? pageUrl.replace(/^https?:\/\//i, '')
-                            : 'Connected — add page URL'
-                          : 'Not connected'}
+                          ? pageName || pageUrl
+                            ? `${viaMeta ? 'Meta · ' : ''}${(pageName || pageUrl.replace(/^https?:\/\//i, '')).slice(0, 48)}`
+                            : viaMeta
+                              ? 'Connected via Meta'
+                              : 'Connected — add page URL'
+                          : usesMetaOAuth
+                            ? 'Connect with Meta'
+                            : 'Not connected'}
                       </div>
                     </div>
                   </div>
@@ -490,7 +633,7 @@ export function SettingsPage() {
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>
                     )}
-                    {connected && (
+                    {connected && !viaMeta && (
                       <button
                         type="button"
                         onClick={() => {
@@ -509,6 +652,7 @@ export function SettingsPage() {
                       onClick={() => {
                         if (connected) {
                           setConnectError(null)
+                          setConnectInfo(null)
                           setPendingConnect(null)
                           setEditingUrlFor(null)
                           disconnectPlatform(p)
@@ -529,7 +673,8 @@ export function SettingsPage() {
                         </>
                       ) : (
                         <>
-                          <Link2 className="h-3.5 w-3.5" /> Connect
+                          <Link2 className="h-3.5 w-3.5" />{' '}
+                          {usesMetaOAuth ? 'Connect with Meta' : 'Connect'}
                         </>
                       )}
                     </button>

@@ -44,22 +44,32 @@ export async function GET() {
         .maybeSingle(),
       supabase
         .from('channel_connections')
-        .select('platform, status, page_url')
+        .select('platform, status, page_url, page_name, provider, external_page_id')
         .eq('organization_id', ctx.organizationId)
         .eq('status', 'connected'),
       getCreditBalance(supabase, ctx.organizationId),
       getOrgPlanTier(supabase, ctx.organizationId),
     ])
 
-    // If page_url migration isn’t applied yet, fall back so connections still load.
-    let connectionRows = connectionsRes.data ?? []
+    // If newer Meta columns aren’t applied yet, fall back so connections still load.
+    let connectionRows: Array<Record<string, unknown>> = (connectionsRes.data ??
+      []) as Array<Record<string, unknown>>
     if (connectionsRes.error) {
       const fallback = await supabase
         .from('channel_connections')
-        .select('platform, status')
+        .select('platform, status, page_url')
         .eq('organization_id', ctx.organizationId)
         .eq('status', 'connected')
-      connectionRows = fallback.data ?? []
+      if (fallback.error) {
+        const bare = await supabase
+          .from('channel_connections')
+          .select('platform, status')
+          .eq('organization_id', ctx.organizationId)
+          .eq('status', 'connected')
+        connectionRows = (bare.data ?? []) as Array<Record<string, unknown>>
+      } else {
+        connectionRows = (fallback.data ?? []) as Array<Record<string, unknown>>
+      }
     }
 
     const bp = bpRes.data
@@ -69,13 +79,20 @@ export async function GET() {
       signedBrandUrl(supabase, bp?.logo_path),
     ])
 
-    const connectedChannels = connectionRows.map((c) => ({
-      platform: c.platform,
-      pageUrl:
-        'page_url' in c && typeof (c as { page_url?: string }).page_url === 'string'
-          ? String((c as { page_url?: string }).page_url)
-          : '',
-    }))
+    const connectedChannels = connectionRows.map((c) => {
+      const platform = String(c.platform ?? '')
+      const pageUrl = typeof c.page_url === 'string' ? c.page_url : ''
+      const pageName = typeof c.page_name === 'string' ? c.page_name : ''
+      const provider = typeof c.provider === 'string' ? c.provider : ''
+      const externalPageId = typeof c.external_page_id === 'string' ? c.external_page_id : ''
+      return {
+        platform,
+        pageUrl,
+        pageName,
+        provider,
+        connectedViaMeta: provider === 'meta' || Boolean(externalPageId),
+      }
+    })
 
     return Response.json({
       organizationId: ctx.organizationId,
@@ -210,7 +227,19 @@ export async function PATCH(req: Request) {
       const platform = String(body.disconnectPlatform)
       await supabase
         .from('channel_connections')
-        .update({ status: 'disconnected', connected_at: null, page_url: null })
+        .update({
+          status: 'disconnected',
+          connected_at: null,
+          page_url: null,
+          provider: null,
+          external_page_id: null,
+          external_ig_user_id: null,
+          page_name: null,
+          access_token: null,
+          token_expires_at: null,
+          scopes: null,
+          meta_user_id: null,
+        })
         .eq('organization_id', ctx.organizationId)
         .eq('platform', platform)
     }
