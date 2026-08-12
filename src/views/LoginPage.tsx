@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { ArrowUp, Eye, EyeOff } from 'lucide-react'
 import { FreyaLoginFigure } from '../components/FreyaLoginFigure'
 import { LoginStageBackground } from '../components/LoginStageBackground'
@@ -38,7 +38,10 @@ function hasSupabaseEnv() {
 export function LoginPage() {
   const { login, hydrateFromBackend } = useApp()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
+  const pathMode: 'signup' | 'login' | null =
+    location.pathname === '/login' ? 'login' : location.pathname === '/signup' ? 'signup' : null
   const [step, setStep] = useState<Step>('name')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -48,7 +51,7 @@ export function LoginPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [returningName, setReturningName] = useState<string | null>(null)
   const [isReturningVisitor, setIsReturningVisitor] = useState(false)
-  const [mode, setMode] = useState<'signup' | 'login'>('signup')
+  const [mode, setMode] = useState<'signup' | 'login'>(pathMode ?? 'signup')
   const [authPanel, setAuthPanel] = useState<AuthPanel>('account')
   const [error, setError] = useState<string | null>(null)
   const [checkEmail, setCheckEmail] = useState<string | null>(null)
@@ -65,6 +68,22 @@ export function LoginPage() {
   const threadRef = useRef<HTMLDivElement>(null)
   const ownerNameRef = useRef('')
   const bootstrapped = useRef(false)
+
+  function switchAuthMode(next: 'signup' | 'login') {
+    setMode(next)
+    setCheckEmail(null)
+    setVerified(false)
+    setPasswordReset(false)
+    setError(null)
+    setConfirmPassword('')
+    setShowPassword(false)
+    setShowConfirmPassword(false)
+    if (next === 'login' && location.pathname !== '/login') {
+      navigate('/login', { replace: true })
+    } else if (next === 'signup' && location.pathname !== '/signup' && location.pathname !== '/') {
+      navigate('/signup', { replace: true })
+    }
+  }
 
   const freyaEngaged =
     inputFocused ||
@@ -83,7 +102,7 @@ export function LoginPage() {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, typing, step, verified, checkEmail, resetSent, authPanel])
 
-  // Deep-link from email confirmation / password reset / team invite / auth errors
+  // Deep-link from email confirmation / password reset / team invite / auth errors / path
   useEffect(() => {
     if (bootstrapped.current) return
     bootstrapped.current = true
@@ -94,6 +113,16 @@ export function LoginPage() {
     const emailParam = searchParams.get('email')?.trim() || ''
     const errParam = searchParams.get('error')
     const inviteParam = searchParams.get('invite')?.trim() || ''
+
+    // Legacy query modes on `/` → dedicated routes
+    if (location.pathname === '/' && (modeParam === 'login' || modeParam === 'signup')) {
+      const qs = new URLSearchParams(searchParams.toString())
+      qs.delete('mode')
+      const rest = qs.toString()
+      navigate(`/${modeParam}${rest ? `?${rest}` : ''}`, { replace: true })
+      bootstrapped.current = false
+      return
+    }
 
     if (emailParam) setEmail(emailParam)
 
@@ -208,7 +237,11 @@ export function LoginPage() {
       setMode('login')
       setAuthPanel('forgot')
       setWelcomeBackMessages(rememberedName)
-    } else if (modeParam === 'login' || (isReturning && hasSupabaseEnv())) {
+    } else if (
+      pathMode === 'login' ||
+      modeParam === 'login' ||
+      (isReturning && hasSupabaseEnv() && pathMode !== 'signup')
+    ) {
       // Returning browser visitor (saved name or email): skip name ask.
       setStep('auth')
       setMode('login')
@@ -224,6 +257,10 @@ export function LoginPage() {
           ? 'That confirmation link expired or already used. Log in if you already verified, or sign up again.'
           : decodeURIComponent(errParam),
       )
+    } else if (pathMode === 'signup') {
+      setStep('name')
+      setMode('signup')
+      setOpenerMessages()
     } else {
       setStep('name')
       setMode('signup')
@@ -243,7 +280,7 @@ export function LoginPage() {
     }
 
     setBootReady(true)
-  }, [searchParams, setSearchParams])
+  }, [searchParams, setSearchParams, location.pathname, pathMode, navigate])
 
   async function finishToOnboarding(displayName: string, fromBackend = false) {
     setExiting(true)
@@ -700,14 +737,7 @@ export function LoginPage() {
                             aria-selected={mode === 'signup'}
                             className={`login-chat-auth-mode${mode === 'signup' ? ' is-active' : ''}`}
                             onClick={() => {
-                              setMode('signup')
-                              setCheckEmail(null)
-                              setVerified(false)
-                              setPasswordReset(false)
-                              setError(null)
-                              setConfirmPassword('')
-                              setShowPassword(false)
-                              setShowConfirmPassword(false)
+                              switchAuthMode('signup')
                             }}
                           >
                             Sign up
@@ -718,12 +748,7 @@ export function LoginPage() {
                             aria-selected={mode === 'login'}
                             className={`login-chat-auth-mode${mode === 'login' ? ' is-active' : ''}`}
                             onClick={() => {
-                              setMode('login')
-                              setCheckEmail(null)
-                              setError(null)
-                              setConfirmPassword('')
-                              setShowPassword(false)
-                              setShowConfirmPassword(false)
+                              switchAuthMode('login')
                             }}
                           >
                             Log in
@@ -741,7 +766,7 @@ export function LoginPage() {
                               type="button"
                               className="login-chat-auth-notice-link"
                               onClick={() => {
-                                setMode('login')
+                                switchAuthMode('login')
                                 setCheckEmail(null)
                               }}
                             >

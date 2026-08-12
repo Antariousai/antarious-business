@@ -106,7 +106,7 @@ export default function ResetPasswordPage() {
                   <p className="login-chat-auth-notice-title">Link expired</p>
                   <p>Request a new reset email from the log in screen.</p>
                 </div>
-                <Link href="/?mode=login" className="login-chat-auth-submit" style={{ textAlign: 'center' }}>
+                <Link href="/login" className="login-chat-auth-submit" style={{ textAlign: 'center' }}>
                   Back to log in
                 </Link>
               </div>

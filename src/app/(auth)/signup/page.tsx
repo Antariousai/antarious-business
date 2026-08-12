@@ -2,6 +2,6 @@
 
 import { AuthLoginRoutePage } from '@/components/AuthLoginRoutePage'
 
-export default function RootAuthPage() {
+export default function SignupRoutePage() {
   return <AuthLoginRoutePage />
 }

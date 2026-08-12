@@ -296,7 +296,7 @@ export default function TermsPage() {
           <Link href="/" className="legal-page-brand" aria-label="Antarious home">
             <Logo size={40} />
           </Link>
-          <Link href="/?mode=login" className="legal-page-back">
+          <Link href="/login" className="legal-page-back">
             Back to log in
           </Link>
         </header>

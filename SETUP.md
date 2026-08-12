@@ -129,6 +129,8 @@ Publish / inbox webhooks are separate follow-ups; connect stores encrypted Page 
 - **Site URL:** `https://app.antarious.com`
 - **Redirect URLs allowlist** (add each):
   - `https://app.antarious.com/**` (or at least the paths below)
+  - `https://app.antarious.com/login`
+  - `https://app.antarious.com/signup`
   - `https://app.antarious.com/auth/callback`
   - `https://app.antarious.com/auth/confirm`
   - `https://app.antarious.com/auth/reset-password`

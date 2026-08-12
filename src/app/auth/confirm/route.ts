@@ -16,16 +16,16 @@ export async function GET(request: NextRequest) {
   const next = nextRaw?.startsWith('/') ? nextRaw : null
 
   if (!token_hash || !type) {
-    return NextResponse.redirect(`${origin}/?error=auth_confirm`)
+    return NextResponse.redirect(`${origin}/login?error=auth_confirm`)
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !key) {
-    return NextResponse.redirect(`${origin}/?error=auth_confirm`)
+    return NextResponse.redirect(`${origin}/login?error=auth_confirm`)
   }
 
-  let destination = `${origin}/?verified=1`
+  let destination = `${origin}/login?verified=1`
   const pendingCookies: { name: string; value: string; options: Record<string, unknown> }[] = []
 
   const supabase = createServerClient(url, key, {
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabase.auth.verifyOtp({ type, token_hash })
   if (error) {
     return NextResponse.redirect(
-      `${origin}/?error=${encodeURIComponent(error.message || 'auth_confirm')}`,
+      `${origin}/login?error=${encodeURIComponent(error.message || 'auth_confirm')}`,
     )
   }
 
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     await supabase.auth.signOut()
     const qs = new URLSearchParams({ verified: '1' })
     if (email) qs.set('email', email)
-    destination = `${origin}/?${qs.toString()}`
+    destination = `${origin}/login?${qs.toString()}`
   } else if (type === 'recovery') {
     // Keep recovery session so the user can set a new password.
     destination = `${origin}${next || '/auth/reset-password'}`

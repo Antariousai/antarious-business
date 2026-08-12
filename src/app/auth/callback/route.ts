@@ -15,13 +15,13 @@ export async function GET(request: NextRequest) {
   const next = nextRaw.startsWith('/') ? nextRaw : '/onboarding'
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/?error=auth_callback`)
+    return NextResponse.redirect(`${origin}/login?error=auth_callback`)
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !key) {
-    return NextResponse.redirect(`${origin}/?error=auth_callback`)
+    return NextResponse.redirect(`${origin}/login?error=auth_callback`)
   }
 
   const pendingCookies: { name: string; value: string; options: Record<string, unknown> }[] = []
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
   if (error) {
     return NextResponse.redirect(
-      `${origin}/?error=${encodeURIComponent(error.message || 'auth_callback')}`,
+      `${origin}/login?error=${encodeURIComponent(error.message || 'auth_callback')}`,
     )
   }
 
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     await supabase.auth.signOut()
     const qs = new URLSearchParams({ verified: '1' })
     if (email) qs.set('email', email)
-    destination = `${origin}/?${qs.toString()}`
+    destination = `${origin}/login?${qs.toString()}`
   }
 
   if (intent === 'confirm' || intent === 'verified') {

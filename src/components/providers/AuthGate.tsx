@@ -25,12 +25,12 @@ export function AuthGate({
       return
     }
     if (mode === 'onboarding') {
-      if (!profile) router.replace('/')
+      if (!profile) router.replace('/login')
       else if (onboarded) router.replace('/app')
       return
     }
     // app
-    if (!profile) router.replace('/')
+    if (!profile) router.replace('/login')
     else if (!onboarded) router.replace('/onboarding')
   }, [mode, profile, onboarded, router, ready])
 
