@@ -208,7 +208,7 @@ interface AppContextValue {
   logout: () => void
   updateGoals: (goals: GoalId[]) => void
   updatePlatforms: (platforms: Platform[]) => void
-  updateProfile: (patch: Partial<BusinessProfile>) => void
+  updateProfile: (patch: Partial<BusinessProfile>) => Promise<void>
   updatePrefs: (patch: Partial<FreyaPrefs>) => void
   connectPlatform: (platform: Platform, pageUrl?: string) => void
   disconnectPlatform: (platform: Platform) => void
@@ -231,12 +231,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false)
 
   const applyMe = useCallback((me: MeResponse) => {
-    const nextProfile = normalizeProfile({
-      ...me.profile,
-      planTier: me.planTier ?? me.profile.planTier ?? 'starter',
-      platforms: (me.profile.platforms ?? []).map((p) => asPlatform(p)),
+    setProfile((prev) => {
+      const nextProfile = normalizeProfile({
+        ...me.profile,
+        planTier: me.planTier ?? me.profile.planTier ?? 'starter',
+        platforms: (me.profile.platforms ?? []).map((p) => asPlatform(p)),
+      })
+      if (!nextProfile) return nextProfile
+      // Keep optimistic brand URLs if the server path matches but signed URL is missing,
+      // or if a newer local path hasn't been reflected yet (in-flight PATCH).
+      if (prev?.coverPath && prev.coverUrl) {
+        if (
+          prev.coverPath === nextProfile.coverPath &&
+          !nextProfile.coverUrl
+        ) {
+          nextProfile.coverUrl = prev.coverUrl
+        } else if (
+          prev.coverPath !== nextProfile.coverPath &&
+          prev.coverPath &&
+          !nextProfile.coverPath
+        ) {
+          nextProfile.coverPath = prev.coverPath
+          nextProfile.coverUrl = prev.coverUrl
+        }
+      }
+      if (prev?.logoPath && prev.logoUrl) {
+        if (prev.logoPath === nextProfile.logoPath && !nextProfile.logoUrl) {
+          nextProfile.logoUrl = prev.logoUrl
+        } else if (
+          prev.logoPath !== nextProfile.logoPath &&
+          prev.logoPath &&
+          !nextProfile.logoPath
+        ) {
+          nextProfile.logoPath = prev.logoPath
+          nextProfile.logoUrl = prev.logoUrl
+        }
+      }
+      return nextProfile
     })
-    setProfile(nextProfile)
     setOrganizationId(me.organizationId ?? null)
     setOnboarded(me.onboarded)
     setPrefs(normalizePrefs(me.prefs))
@@ -440,15 +472,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const updateProfile = useCallback(
-    (patch: Partial<BusinessProfile>) => {
+    async (patch: Partial<BusinessProfile>) => {
       if (!profile) return
-      if (backend) {
-        void apiFetch('/api/me', {
-          method: 'PATCH',
-          body: JSON.stringify({ profile: patch }),
-        })
-      }
+      // Optimistic local update first so cover/logo change is visible immediately.
       persist({ profile: { ...profile, ...patch }, onboarded, prefs, billing })
+      if (!backend) return
+      // Persist only server-known fields (never send ephemeral blob: URLs as paths).
+      const serverPatch: Record<string, unknown> = {}
+      const keys = [
+        'ownerName',
+        'businessName',
+        'industry',
+        'customers',
+        'businessType',
+        'audienceServe',
+        'teamSize',
+        'goals',
+        'platforms',
+        'planTier',
+        'coverPath',
+        'logoPath',
+      ] as const
+      for (const key of keys) {
+        if (key in patch) serverPatch[key] = patch[key]
+      }
+      if (!Object.keys(serverPatch).length) return
+      await apiFetch('/api/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ profile: serverPatch }),
+      })
     },
     [backend, persist, profile, onboarded, prefs, billing],
   )

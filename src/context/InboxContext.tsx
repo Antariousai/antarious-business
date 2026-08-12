@@ -99,8 +99,13 @@ export function InboxProvider({ children }: { children: ReactNode }) {
     void refresh().catch(() => {
       if (!cancelled) setThreads([])
     })
+    // Lightweight polling until Supabase Realtime is wired for inbox.
+    const poll = window.setInterval(() => {
+      void refresh().catch(() => {})
+    }, 8000)
     return () => {
       cancelled = true
+      window.clearInterval(poll)
     }
   }, [backend, ready, refresh])
 
@@ -269,14 +274,21 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   const askFreyaDraft = useCallback(
     (threadId: string) => {
       if (backend) {
-        void apiFetch('/api/inbox/messages', {
+        void apiFetch('/api/inbox/suggest', {
           method: 'POST',
-          body: JSON.stringify({
-            threadId,
-            kind: 'freya_draft',
-            body: `Thanks for reaching out! Happy to help with that — want a few options, or shall I suggest the best fit?`,
-          }),
-        }).then(() => refresh())
+          body: JSON.stringify({ threadId }),
+        })
+          .then(() => refresh())
+          .catch(() =>
+            apiFetch('/api/inbox/messages', {
+              method: 'POST',
+              body: JSON.stringify({
+                threadId,
+                kind: 'freya_draft',
+                body: `Thanks for reaching out! Happy to help with that — want a few options, or shall I suggest the best fit?`,
+              }),
+            }).then(() => refresh()),
+          )
         return
       }
       persist((prev) =>

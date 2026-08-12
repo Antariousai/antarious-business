@@ -88,10 +88,21 @@ export function SettingsPage() {
   const [pageUrlDraft, setPageUrlDraft] = useState('')
   const [editingUrlFor, setEditingUrlFor] = useState<Platform | null>(null)
   const [metaEnabled, setMetaEnabled] = useState(false)
+  const [igLoginEnabled, setIgLoginEnabled] = useState(true)
   const [metaPages, setMetaPages] = useState<
     { id: string; name: string; pageUrl: string; igUsername: string | null; hasInstagram: boolean }[]
   >([])
   const [pickingPage, setPickingPage] = useState(false)
+  const [diag, setDiag] = useState<{
+    instagram?: { connected?: boolean; account?: string; token?: string; lastSyncedAt?: string | null; lastError?: string | null }
+    counts?: { postsSynced?: number; commentsSynced?: number; conversations?: number }
+    lastWebhook?: { received_at?: string; status?: string } | null
+    redirectUris?: { facebookPageOAuth?: string; instagramBusinessLogin?: string; webhook?: string }
+  } | null>(null)
+  const [diagBusy, setDiagBusy] = useState<string | null>(null)
+  const [socialPosts, setSocialPosts] = useState<
+    { id: string; caption: string | null; permalink: string | null; published_at: string | null; comments_count: number; thumbnail_url: string | null; media_type: string | null }[]
+  >([])
   const [profileDraft, setProfileDraft] = useState({
     ownerName: '',
     businessName: '',
@@ -122,9 +133,59 @@ export function SettingsPage() {
     if (!backend) return
     void fetch('/api/meta/status')
       .then((r) => r.json())
-      .then((j: { enabled?: boolean }) => setMetaEnabled(Boolean(j.enabled)))
+      .then((j: { enabled?: boolean; igLoginEnabled?: boolean }) => {
+        setMetaEnabled(Boolean(j.enabled))
+        setIgLoginEnabled(j.igLoginEnabled !== false)
+      })
       .catch(() => setMetaEnabled(false))
   }, [backend])
+
+  async function refreshDiagnostics() {
+    if (!backend || !metaEnabled) return
+    try {
+      const [d, p] = await Promise.all([
+        fetch('/api/meta/diagnostics').then((r) => r.json()),
+        fetch('/api/meta/sync/media').then((r) => r.json()),
+      ])
+      setDiag(d)
+      setSocialPosts(Array.isArray(p.posts) ? p.posts : [])
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    if (!backend || !metaEnabled) return
+    void refreshDiagnostics()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backend, metaEnabled, prefs.connectedPlatforms.join(',')])
+
+  async function runMetaAction(action: string) {
+    setDiagBusy(action)
+    setConnectError(null)
+    try {
+      const routes: Record<string, { url: string; method?: string }> = {
+        account: { url: '/api/meta/sync/account', method: 'POST' },
+        posts: { url: '/api/meta/sync/media', method: 'POST' },
+        conversations: { url: '/api/meta/sync/conversations', method: 'POST' },
+      }
+      const r = routes[action]
+      if (!r) return
+      const res = await fetch(r.url, { method: r.method || 'POST' })
+      const json = (await res.json()) as { error?: string; message?: string; upserted?: number }
+      if (!res.ok) {
+        setConnectError(json.error || `${action} failed`)
+        return
+      }
+      setConnectInfo(json.message || `${action} sync complete${json.upserted != null ? ` (${json.upserted})` : ''}`)
+      await refreshDiagnostics()
+      await hydrateFromBackend()
+    } catch {
+      setConnectError(`${action} sync failed`)
+    } finally {
+      setDiagBusy(null)
+    }
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -218,8 +279,12 @@ export function SettingsPage() {
       return
     }
 
-    // Real Meta OAuth for FB / IG / Messenger when configured
+    // Equal options: Instagram Business Login OR Facebook Page OAuth (FB/Messenger/optional IG via Page)
     if (backend && metaEnabled && META_PLATFORMS.includes(p)) {
+      if (p === 'Instagram' && igLoginEnabled) {
+        window.location.href = '/api/meta/instagram/oauth/start'
+        return
+      }
       window.location.href = `/api/meta/oauth/start?platform=${encodeURIComponent(p)}`
       return
     }
@@ -616,7 +681,11 @@ export function SettingsPage() {
                               ? 'Connected via Meta'
                               : 'Connected — add page URL'
                           : usesMetaOAuth
-                            ? 'Connect with Meta'
+                            ? p === 'Instagram' && igLoginEnabled
+                              ? 'Connect Instagram'
+                              : p === 'Facebook' || p === 'Messenger'
+                                ? 'Connect Facebook Page'
+                                : 'Connect with Meta'
                             : 'Not connected'}
                       </div>
                     </div>
@@ -632,6 +701,16 @@ export function SettingsPage() {
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>
+                    )}
+                    {connected && viaMeta && p === 'Instagram' && (
+                      <button
+                        type="button"
+                        onClick={() => void runMetaAction('account')}
+                        disabled={diagBusy === 'account'}
+                        className="rounded-full bg-white px-2.5 py-2 text-[12px] font-bold text-sky ring-1 ring-sky/20 hover:bg-sky-soft disabled:opacity-50"
+                      >
+                        Sync
+                      </button>
                     )}
                     {connected && !viaMeta && (
                       <button
@@ -674,7 +753,11 @@ export function SettingsPage() {
                       ) : (
                         <>
                           <Link2 className="h-3.5 w-3.5" />{' '}
-                          {usesMetaOAuth ? 'Connect with Meta' : 'Connect'}
+                          {usesMetaOAuth
+                            ? p === 'Instagram' && igLoginEnabled
+                              ? 'Connect Instagram'
+                              : 'Connect Facebook Page'
+                            : 'Connect'}
                         </>
                       )}
                     </button>
@@ -733,6 +816,132 @@ export function SettingsPage() {
           Go to Content →
         </Link>
       </Card>
+
+      {backend && metaEnabled && (
+        <Card className="overflow-hidden p-5">
+          <h3 className="text-[15px] font-bold text-ink">Instagram / Meta diagnostics</h3>
+          <p className="mt-1 text-[12px] text-muted">
+            Tokens stay on the server. Use Sync for account/posts; DMs arrive via webhooks.
+          </p>
+          {diag?.instagram?.connected ? (
+            <div className="mt-3 space-y-1 text-[13px] text-ink">
+              <div>
+                Connection: <span className="font-semibold text-emerald-600">Connected</span>
+                {diag.instagram.account ? ` · ${diag.instagram.account}` : ''}
+              </div>
+              <div>
+                Token:{' '}
+                <span className="font-semibold">
+                  {diag.instagram.token === 'valid'
+                    ? 'Valid'
+                    : diag.instagram.token === 'invalid'
+                      ? 'Invalid — reconnect'
+                      : diag.instagram.token || 'Unknown'}
+                </span>
+              </div>
+              <div className="text-muted">
+                Last synced: {diag.instagram.lastSyncedAt ? new Date(diag.instagram.lastSyncedAt).toLocaleString() : '—'}
+              </div>
+              <div className="text-muted">
+                Posts: {diag.counts?.postsSynced ?? 0} · Comments: {diag.counts?.commentsSynced ?? 0} ·
+                Conversations: {diag.counts?.conversations ?? 0}
+              </div>
+              <div className="text-muted">
+                Last webhook:{' '}
+                {diag.lastWebhook?.received_at
+                  ? `${new Date(diag.lastWebhook.received_at).toLocaleString()} (${diag.lastWebhook.status})`
+                  : 'None yet'}
+              </div>
+              {diag.instagram.lastError && (
+                <div className="rounded-lg bg-rose-50 px-2 py-1.5 text-[12px] text-rose-700">
+                  Last Meta error: {diag.instagram.lastError}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 text-[13px] text-muted">Connect Instagram above to run diagnostics.</p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(
+              [
+                ['account', 'Sync account'],
+                ['posts', 'Sync posts'],
+                ['conversations', 'Test conversation sync'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                disabled={Boolean(diagBusy)}
+                onClick={() => void runMetaAction(id)}
+                className="rounded-full bg-sky px-3 py-2 text-[12px] font-bold text-white hover:bg-sky-bright disabled:opacity-50"
+              >
+                {diagBusy === id ? 'Working…' : label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => void refreshDiagnostics()}
+              className="rounded-full bg-slate-100 px-3 py-2 text-[12px] font-bold text-slate-700 hover:bg-slate-200"
+            >
+              Refresh status
+            </button>
+          </div>
+          {socialPosts.length > 0 && (
+            <ul className="mt-4 max-h-72 space-y-2 overflow-y-auto">
+              {socialPosts.slice(0, 12).map((post) => (
+                <li
+                  key={post.id}
+                  className="flex gap-3 rounded-xl border border-sky/10 bg-white/80 p-2.5"
+                >
+                  {post.thumbnail_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={post.thumbnail_url}
+                      alt=""
+                      className="h-14 w-14 shrink-0 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-sky-soft text-[10px] font-bold text-sky">
+                      {post.media_type || 'POST'}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-[12px] text-ink">{post.caption || '(no caption)'}</p>
+                    <p className="mt-1 text-[11px] text-muted">
+                      {post.published_at ? new Date(post.published_at).toLocaleDateString() : '—'} ·{' '}
+                      {post.comments_count ?? 0} comments
+                      {post.permalink ? (
+                        <>
+                          {' · '}
+                          <a
+                            href={post.permalink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold text-sky hover:underline"
+                          >
+                            View on Instagram
+                          </a>
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {diag?.redirectUris && (
+            <details className="mt-3 text-[11px] text-muted">
+              <summary className="cursor-pointer font-semibold text-slate-600">Callback URLs for Meta dashboard</summary>
+              <ul className="mt-2 space-y-1 break-all font-mono">
+                <li>FB Page OAuth: {diag.redirectUris.facebookPageOAuth}</li>
+                <li>IG Login: {diag.redirectUris.instagramBusinessLogin}</li>
+                <li>Webhook: {diag.redirectUris.webhook}</li>
+              </ul>
+            </details>
+          )}
+        </Card>
+      )}
 
       <Card className="overflow-hidden p-5">
         <h3 className="text-[15px] font-bold text-ink">Freya preferences</h3>

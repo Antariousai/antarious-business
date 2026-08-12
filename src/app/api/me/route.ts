@@ -72,7 +72,29 @@ export async function GET() {
       }
     }
 
-    const bp = bpRes.data
+    // If brand-image columns aren’t applied yet, fall back so /api/me still loads.
+    let bp = bpRes.data as {
+      business_name?: string | null
+      industry?: string | null
+      customers?: string | null
+      business_type?: string | null
+      audience_serve?: string | null
+      team_size?: string | null
+      onboarded?: boolean | null
+      cover_path?: string | null
+      logo_path?: string | null
+    } | null
+    if (bpRes.error) {
+      const fallback = await supabase
+        .from('business_profiles')
+        .select(
+          'business_name, industry, customers, business_type, audience_serve, team_size, onboarded',
+        )
+        .eq('organization_id', ctx.organizationId)
+        .maybeSingle()
+      bp = fallback.data
+    }
+
     const prefs = prefsRes.data
     const [coverUrl, logoUrl] = await Promise.all([
       signedBrandUrl(supabase, bp?.cover_path),

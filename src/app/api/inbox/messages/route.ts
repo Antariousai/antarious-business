@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireOrgContext, jsonError } from '@/lib/org/context'
 import { assertModuleAccess } from '@/lib/entitlements'
+import { sendOutboundViaMeta } from '@/lib/integrations/meta/sendInboxMessage'
 
 export const runtime = 'nodejs'
 
@@ -38,15 +39,54 @@ export async function POST(req: Request) {
     if (!threadId) return Response.json({ error: 'threadId required' }, { status: 400 })
 
     const kind = body.kind === 'freya_draft' ? 'freya_draft' : 'you'
+    const text = String(body.body ?? '')
+
+    if (kind === 'freya_draft') {
+      const { data, error } = await supabase
+        .from('inbox_messages')
+        .insert({
+          thread_id: threadId,
+          organization_id: ctx.organizationId,
+          kind,
+          body: text,
+          delivery_status: 'local_only',
+          direction: 'outbound',
+          sender_type: 'ai',
+          created_by: ctx.user.id,
+        })
+        .select('*')
+        .single()
+      if (error) throw error
+
+      await supabase.from('freya_activity_items').insert({
+        organization_id: ctx.organizationId,
+        kind: 'send_inbox_draft',
+        title: 'Approve Freya reply',
+        summary: text.slice(0, 120),
+        status: 'waiting',
+        payload: { action: 'send_inbox_draft', message_id: data.id, thread_id: threadId },
+        href: '/app/inbox',
+        created_by: ctx.user.id,
+      })
+
+      return Response.json({ message: data }, { status: 201 })
+    }
+
+    const send = await sendOutboundViaMeta(supabase, ctx.organizationId, threadId, text)
+    const deliveryStatus = send.ok ? 'sent' : send.deliveryStatus
     const { data, error } = await supabase
       .from('inbox_messages')
       .insert({
         thread_id: threadId,
         organization_id: ctx.organizationId,
-        kind,
-        body: String(body.body ?? ''),
-        delivery_status: kind === 'you' ? 'sent_stub' : 'local_only',
+        kind: 'you',
+        body: text,
+        delivery_status: deliveryStatus,
+        direction: 'outbound',
+        sender_type: 'agent',
+        provider_message_id: send.ok ? send.providerMessageId : null,
         created_by: ctx.user.id,
+        metadata: send.ok ? {} : { send_error: send.error, user_message: send.userMessage },
       })
       .select('*')
       .single()
@@ -58,20 +98,14 @@ export async function POST(req: Request) {
       .update({ last_message_at: new Date().toISOString(), unread: false })
       .eq('id', threadId)
 
-    if (kind === 'freya_draft') {
-      await supabase.from('freya_activity_items').insert({
-        organization_id: ctx.organizationId,
-        kind: 'send_inbox_draft',
-        title: 'Approve Freya reply',
-        summary: String(body.body ?? '').slice(0, 120),
-        status: 'waiting',
-        payload: { action: 'send_inbox_draft', message_id: data.id, thread_id: threadId },
-        href: '/app/inbox',
-        created_by: ctx.user.id,
-      })
-    }
-
-    return Response.json({ message: data }, { status: 201 })
+    return Response.json(
+      {
+        message: data,
+        delivery: send,
+        warning: send.ok ? null : send.userMessage,
+      },
+      { status: 201 },
+    )
   } catch (err) {
     return jsonError(err)
   }
@@ -101,15 +135,42 @@ export async function PATCH(req: Request) {
     }
 
     if (action === 'approve') {
-      const { data: msg, error } = await supabase
+      const { data: draft, error: dErr } = await supabase
         .from('inbox_messages')
-        .update({ kind: 'you', delivery_status: 'sent_stub' })
+        .select('*')
         .eq('id', id)
         .eq('organization_id', ctx.organizationId)
         .eq('kind', 'freya_draft')
-        .select('thread_id')
+        .maybeSingle()
+      if (dErr) throw dErr
+      if (!draft) return Response.json({ error: 'Draft not found' }, { status: 404 })
+
+      const send = await sendOutboundViaMeta(
+        supabase,
+        ctx.organizationId,
+        draft.thread_id,
+        draft.body,
+      )
+      const deliveryStatus = send.ok ? 'sent' : send.deliveryStatus
+
+      const { data: msg, error } = await supabase
+        .from('inbox_messages')
+        .update({
+          kind: 'you',
+          delivery_status: deliveryStatus,
+          direction: 'outbound',
+          sender_type: 'agent',
+          provider_message_id: send.ok ? send.providerMessageId : null,
+          metadata: send.ok
+            ? {}
+            : { send_error: send.error, user_message: send.userMessage },
+        })
+        .eq('id', id)
+        .eq('organization_id', ctx.organizationId)
+        .select('*')
         .maybeSingle()
       if (error) throw error
+
       if (msg?.thread_id) {
         await supabase
           .from('inbox_threads')
@@ -126,7 +187,13 @@ export async function PATCH(req: Request) {
         .eq('organization_id', ctx.organizationId)
         .eq('status', 'waiting')
         .contains('payload', { message_id: id })
-      return Response.json({ ok: true, message: msg })
+
+      return Response.json({
+        ok: true,
+        message: msg,
+        delivery: send,
+        warning: send.ok ? null : send.userMessage,
+      })
     }
 
     if ('body' in body) {

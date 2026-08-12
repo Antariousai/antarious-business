@@ -23,7 +23,11 @@ export function metaAppSecret(): string {
 }
 
 export function metaGraphVersion(): string {
-  return process.env.META_GRAPH_VERSION?.trim() || 'v21.0'
+  return process.env.META_GRAPH_VERSION?.trim() || process.env.META_GRAPH_API_VERSION?.trim() || 'v21.0'
+}
+
+export function metaWebhookVerifyToken(): string {
+  return process.env.META_WEBHOOK_VERIFY_TOKEN?.trim() || ''
 }
 
 export function appBaseUrl(): string {
@@ -40,7 +44,15 @@ export function metaOAuthRedirectUri(): string {
   return `${appBaseUrl()}/api/meta/oauth/callback`
 }
 
-/** Permissions for Page publish + Messenger + Instagram content/DMs (dev + App Review). */
+/** Instagram Business Login (API with Instagram Login) redirect. */
+export function instagramOAuthRedirectUri(): string {
+  return `${appBaseUrl()}/api/meta/instagram/oauth/callback`
+}
+
+/**
+ * Facebook Login scopes for Page + Messenger (+ Page-linked IG).
+ * Distinct from Instagram Business Login scopes.
+ */
 export function metaOAuthScopes(): string {
   const override = process.env.META_OAUTH_SCOPES?.trim()
   if (override) return override
@@ -55,4 +67,24 @@ export function metaOAuthScopes(): string {
     'instagram_manage_messages',
     'business_management',
   ].join(',')
+}
+
+/** Instagram API with Instagram Login scopes (matches Developer Dashboard Business permissions). */
+export function instagramBusinessLoginScopes(): string {
+  const override = process.env.META_IG_LOGIN_SCOPES?.trim()
+  if (override) return override
+  return [
+    'instagram_business_basic',
+    'instagram_business_manage_messages',
+    'instagram_business_content_publish',
+    'instagram_business_manage_comments',
+    'instagram_business_manage_insights',
+  ].join(',')
+}
+
+/** Prefer Instagram Business Login for the Instagram Connect button when configured. */
+export function preferInstagramBusinessLogin(): boolean {
+  const flag = process.env.META_IG_LOGIN_ENABLED?.trim().toLowerCase()
+  if (flag === '0' || flag === 'false') return false
+  return metaConfigured()
 }

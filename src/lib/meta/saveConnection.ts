@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getEntitlements, getOrgPlanTier } from '@/lib/entitlements'
 import type { PendingMetaPage } from './oauthState'
-import { metaOAuthScopes } from './config'
+import { metaOAuthScopes, instagramBusinessLoginScopes } from './config'
+import { encryptSecret } from '@/lib/integrations/crypto/tokenEncryption'
 
 export type SaveMetaConnectionResult = {
   platforms: string[]
@@ -16,19 +17,30 @@ type ConnectionRow = {
   status: 'connected'
   connected_at: string
   provider: string
-  external_page_id: string
+  external_page_id: string | null
   external_ig_user_id: string | null
   page_name: string
   page_url: string
-  access_token: string
-  token_expires_at: null
+  access_token: string | null
+  access_token_enc: string
+  token_kind: string
+  token_expires_at: string | null
   scopes: string
   meta_user_id: string | null
+  last_error: null
+  metadata: Record<string, unknown>
+}
+
+function sealToken(token: string): { access_token: string | null; access_token_enc: string } {
+  const access_token_enc = encryptSecret(token)
+  if (access_token_enc.startsWith('v1:')) {
+    return { access_token: null, access_token_enc }
+  }
+  return { access_token: token, access_token_enc }
 }
 
 /**
  * Persist Page token for Meta platforms without exceeding plan channel slots.
- * Priority: always Facebook (token home) → requested platform → Instagram if linked → Messenger.
  * Never return the token to callers.
  */
 export async function saveMetaPageConnection(
@@ -58,6 +70,7 @@ export async function saveMetaPageConnection(
     ? `https://www.instagram.com/${page.igUsername}`
     : fbUrl
   const requested = opts?.requestedPlatform || 'Facebook'
+  const sealed = sealToken(page.accessToken)
 
   const base = {
     organization_id: organizationId,
@@ -66,10 +79,13 @@ export async function saveMetaPageConnection(
     provider: 'meta',
     external_page_id: page.id,
     external_ig_user_id: page.igUserId,
-    access_token: page.accessToken,
-    token_expires_at: null,
+    ...sealed,
+    token_kind: 'page',
+    token_expires_at: null as string | null,
     scopes,
     meta_user_id: opts?.metaUserId ?? null,
+    last_error: null,
+    metadata: {} as Record<string, unknown>,
   }
 
   const candidates: ConnectionRow[] = [
@@ -108,18 +124,12 @@ export async function saveMetaPageConnection(
     })
   }
 
-  // If user asked Instagram but no IG linked, still keep Facebook.
-  if (requested === 'Instagram' && !page.igUserId) {
-    // already have Facebook; nothing else required
-  }
-
   const rows: ConnectionRow[] = []
   let slotsUsed = connected.size
 
   for (const row of candidates) {
     const already = connected.has(row.platform) || rows.some((r) => r.platform === row.platform)
     if (already) {
-      // Reconnect / refresh token always allowed
       if (!rows.some((r) => r.platform === row.platform)) rows.push(row)
       continue
     }
@@ -134,8 +144,6 @@ export async function saveMetaPageConnection(
     )
   }
 
-  // Ensure Facebook is always included when any Meta row is saved (token canonical home),
-  // even if it means replacing a weaker candidate — Facebook should be first candidate.
   if (!rows.some((r) => r.platform === 'Facebook')) {
     const fb = candidates.find((c) => c.platform === 'Facebook')
     if (fb) {
@@ -157,6 +165,88 @@ export async function saveMetaPageConnection(
   }
 }
 
+/** Persist Instagram Business Login (IG user token) connection. */
+export async function saveInstagramUserConnection(
+  supabase: SupabaseClient,
+  organizationId: string,
+  account: {
+    igUserId: string
+    username: string | null
+    accessToken: string
+    expiresAt: string | null
+    metaUserId?: string | null
+  },
+): Promise<SaveMetaConnectionResult> {
+  const tier = await getOrgPlanTier(supabase, organizationId)
+  const max = getEntitlements(tier).maxChannels
+
+  const { data: existing } = await supabase
+    .from('channel_connections')
+    .select('platform, status')
+    .eq('organization_id', organizationId)
+
+  const connected = new Set(
+    (existing ?? [])
+      .filter((r) => r.status === 'connected')
+      .map((r) => String(r.platform)),
+  )
+
+  if (!connected.has('Instagram') && connected.size >= max) {
+    throw new Error(
+      `Your plan allows ${max} connected channel${max === 1 ? '' : 's'}. Disconnect one or upgrade, then try again.`,
+    )
+  }
+
+  const now = new Date().toISOString()
+  const sealed = sealToken(account.accessToken)
+  const pageName = account.username ? `@${account.username}` : 'Instagram'
+  const pageUrl = account.username
+    ? `https://www.instagram.com/${account.username}`
+    : 'https://www.instagram.com/'
+
+  const row = {
+    organization_id: organizationId,
+    platform: 'Instagram',
+    status: 'connected' as const,
+    connected_at: now,
+    provider: 'meta',
+    external_page_id: null,
+    external_ig_user_id: account.igUserId,
+    page_name: pageName,
+    page_url: pageUrl,
+    ...sealed,
+    token_kind: 'instagram_user',
+    token_expires_at: account.expiresAt,
+    scopes: instagramBusinessLoginScopes(),
+    meta_user_id: account.metaUserId ?? null,
+    last_error: null,
+    last_synced_at: now,
+    metadata: { auth: 'instagram_business_login' },
+  }
+
+  const { error } = await supabase.from('channel_connections').upsert(row, {
+    onConflict: 'organization_id,platform',
+  })
+  if (error) throw new Error(error.message)
+
+  console.info(
+    JSON.stringify({
+      event: 'meta.oauth.completed',
+      provider: 'instagram',
+      organizationId,
+      igUserId: account.igUserId,
+      username: account.username,
+    }),
+  )
+
+  return {
+    platforms: ['Instagram'],
+    pageName,
+    pageUrl,
+    hasInstagram: true,
+  }
+}
+
 export async function clearMetaConnection(
   supabase: SupabaseClient,
   organizationId: string,
@@ -173,9 +263,13 @@ export async function clearMetaConnection(
       external_ig_user_id: null,
       page_name: null,
       access_token: null,
+      access_token_enc: null,
+      token_kind: null,
       token_expires_at: null,
       scopes: null,
       meta_user_id: null,
+      last_error: null,
+      metadata: {},
     })
     .eq('organization_id', organizationId)
     .eq('platform', platform)

@@ -99,7 +99,18 @@ export async function applyBusinessProfilePatch(
       .from('business_profiles')
       .update(bpPatch)
       .eq('organization_id', organizationId)
-    if (error) throw error
+    if (error) {
+      // Clearer hint when brand migration isn’t applied on the project yet.
+      if (
+        /cover_path|logo_path|column/i.test(error.message) &&
+        (patch.coverPath !== undefined || patch.logoPath !== undefined)
+      ) {
+        throw new Error(
+          'Brand image columns are missing. Run migration 20260805020000_brand_images.sql in Supabase, then try again.',
+        )
+      }
+      throw error
+    }
   }
 
   if (patch.businessName != null && String(patch.businessName).trim()) {
@@ -166,9 +177,13 @@ export async function signedBrandUrl(
   path: string | null | undefined,
 ): Promise<string | undefined> {
   if (!path) return undefined
+  const cleaned = path.replace(/^\/+/, '')
   const { data, error } = await supabase.storage
     .from('post-media')
-    .createSignedUrl(path, 60 * 60 * 24 * 30)
-  if (error || !data?.signedUrl) return undefined
+    .createSignedUrl(cleaned, 60 * 60 * 24 * 30)
+  if (error || !data?.signedUrl) {
+    console.warn('[signedBrandUrl]', cleaned, error?.message)
+    return undefined
+  }
   return data.signedUrl
 }

@@ -115,7 +115,7 @@ const STATUS_TONE: Record<
 }
 
 export function CommandCentrePage() {
-  const { profile, prefs, canAccess, updateProfile } = useApp()
+  const { profile, prefs, canAccess, updateProfile, hydrateFromBackend } = useApp()
   const { backend } = useBackendMode()
   const { posts: contentPosts } = useContent()
   const { leads } = useLeads()
@@ -173,21 +173,27 @@ export function CommandCentrePage() {
     }
     setBrandError(null)
     setUploading(kind)
+    const previewUrl = URL.createObjectURL(file)
     try {
+      // Instant preview while upload/save runs
+      await updateProfile(kind === 'cover' ? { coverUrl: previewUrl } : { logoUrl: previewUrl })
+
       if (backend) {
         const uploaded = await uploadPostMedia(file)
-        updateProfile(
+        const bust = uploaded.url.includes('?') ? `&v=${Date.now()}` : `?v=${Date.now()}`
+        await updateProfile(
           kind === 'cover'
-            ? { coverPath: uploaded.path, coverUrl: uploaded.url }
-            : { logoPath: uploaded.path, logoUrl: uploaded.url },
+            ? { coverPath: uploaded.path, coverUrl: `${uploaded.url}${bust}` }
+            : { logoPath: uploaded.path, logoUrl: `${uploaded.url}${bust}` },
         )
-      } else {
-        const url = URL.createObjectURL(file)
-        updateProfile(kind === 'cover' ? { coverUrl: url } : { logoUrl: url })
       }
     } catch (err) {
       setBrandError(err instanceof Error ? err.message : 'Upload failed')
+      // Best-effort: re-sync from server if save failed mid-way
+      if (backend) void hydrateFromBackend()
     } finally {
+      // Delay revoke so React can swap off the blob URL first
+      window.setTimeout(() => URL.revokeObjectURL(previewUrl), 2500)
       setUploading(null)
     }
   }
@@ -267,7 +273,12 @@ export function CommandCentrePage() {
 
         {/* Cover photo */}
         <div className="group/cover relative z-0 h-36 w-full sm:h-44 md:h-52">
-          <img src={coverSrc} alt="" className="h-full w-full object-cover" />
+          <img
+            key={coverSrc}
+            src={coverSrc}
+            alt=""
+            className="h-full w-full object-cover"
+          />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0b1220] via-[#0b1220]/35 to-transparent" />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0b1220]/50 via-transparent to-[#0b1220]/20" />
           <span className="pointer-events-none absolute top-4 left-4 inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white/95 uppercase backdrop-blur-sm ring-1 ring-white/15">
@@ -301,6 +312,7 @@ export function CommandCentrePage() {
             <div className="group/logo relative shrink-0 pointer-events-auto">
               <div className="h-24 w-24 overflow-hidden rounded-2xl bg-white p-1 shadow-xl shadow-black/40 ring-4 ring-[#0b1220] sm:h-28 sm:w-28 sm:rounded-3xl">
                 <img
+                  key={logoSrc}
                   src={logoSrc}
                   alt=""
                   className="h-full w-full rounded-xl object-cover sm:rounded-2xl"

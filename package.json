@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "oxlint",
     "test:freya": "vitest run src/lib/agents/__tests__ src/lib/knowledge/__tests__ --pool=forks --poolOptions.forks.singleFork=true",
+    "test:meta": "vitest run src/lib/integrations/__tests__ --pool=forks --poolOptions.forks.singleFork=true",
     "knowledge:ingest": "tsx scripts/ingest-freya-knowledge.ts",
     "build:freya-gifs": "python scripts/build-freya-gifs.py",
     "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
