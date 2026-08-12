@@ -81,6 +81,7 @@ interface StoredState {
 
 type MeResponse = {
   organizationId?: string
+  email?: string | null
   profile: BusinessProfile
   onboarded: boolean
   prefs: FreyaPrefs & {
@@ -188,6 +189,8 @@ interface AppContextValue {
   billing: BillingDemo
   /** Supabase org id when hydrated from backend; null in local demo mode. */
   organizationId: string | null
+  /** Signed-in account email from /api/me (backend); null in demo. */
+  accountEmail: string | null
   planTier: PlanTier
   entitlements: PlanEntitlements
   seatLimit: number
@@ -224,6 +227,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { backend, ready: backendReady, envConfigured } = useBackendMode()
   const [profile, setProfile] = useState<BusinessProfile | null>(null)
   const [organizationId, setOrganizationId] = useState<string | null>(null)
+  const [accountEmail, setAccountEmail] = useState<string | null>(null)
   const [onboarded, setOnboarded] = useState(false)
   const [prefs, setPrefs] = useState<FreyaPrefs>({ ...DEFAULT_PREFS })
   const [billing, setBilling] = useState<BillingDemo>({ ...DEFAULT_BILLING })
@@ -270,6 +274,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return nextProfile
     })
     setOrganizationId(me.organizationId ?? null)
+    setAccountEmail(typeof me.email === 'string' && me.email.trim() ? me.email.trim() : null)
     setOnboarded(me.onboarded)
     setPrefs(normalizePrefs(me.prefs))
     setServerCredits(me.credits)
@@ -293,6 +298,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {
       setProfile(null)
       setOrganizationId(null)
+      setAccountEmail(null)
       setOnboarded(false)
       setPrefs({ ...DEFAULT_PREFS })
       setBilling({ ...DEFAULT_BILLING })
@@ -309,6 +315,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Env present but no session — stay logged out (don't revive demo storage).
         setProfile(null)
         setOrganizationId(null)
+        setAccountEmail(null)
         setOnboarded(false)
         setPrefs({ ...DEFAULT_PREFS })
         setBilling({ ...DEFAULT_BILLING })
@@ -426,6 +433,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearAntariousStorage()
     setProfile(null)
     setOrganizationId(null)
+    setAccountEmail(null)
     setOnboarded(false)
     setPrefs({ ...DEFAULT_PREFS })
     setBilling({ ...DEFAULT_BILLING })
@@ -718,6 +726,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => ({
       profile,
       organizationId,
+      accountEmail,
       onboarded,
       prefs,
       billing,
@@ -751,6 +760,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [
       profile,
       organizationId,
+      accountEmail,
       onboarded,
       prefs,
       billing,
