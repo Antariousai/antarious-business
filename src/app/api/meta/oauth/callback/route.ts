@@ -46,9 +46,17 @@ export async function GET(request: NextRequest) {
   }
 
   if (!code || !stateParam) {
+    const hint = !code && !stateParam
+      ? 'Meta returned to the app without an auth code (often after cancelling or an Invalid Scopes dialog). Fix scopes / redirect URI, then click Connect with Meta again from Settings.'
+      : !code
+        ? 'Meta did not send an authorization code. Check Valid OAuth Redirect URI matches NEXT_PUBLIC_APP_URL + /api/meta/oauth/callback exactly.'
+        : 'Missing OAuth state. Start Connect again from Settings (do not open the callback URL directly).'
     return clearCookies(
       NextResponse.redirect(
-        settingsRedirect({ meta: 'error', message: 'Missing Meta OAuth code' }),
+        settingsRedirect({
+          meta: 'error',
+          message: hint,
+        }),
       ),
     )
   }

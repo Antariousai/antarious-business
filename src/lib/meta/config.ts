@@ -50,8 +50,10 @@ export function instagramOAuthRedirectUri(): string {
 }
 
 /**
- * Facebook Login scopes for Page + Messenger (+ Page-linked IG).
- * Distinct from Instagram Business Login scopes.
+ * Facebook Login scopes for Page + Messenger.
+ * Do not mix Instagram Graph scopes here — Meta rejects them when the
+ * Instagram-with-Facebook-Login product isn’t fully configured (Invalid Scopes).
+ * Connect Instagram via Instagram Business Login (`instagramBusinessLoginScopes`).
  */
 export function metaOAuthScopes(): string {
   const override = process.env.META_OAUTH_SCOPES?.trim()
@@ -62,9 +64,6 @@ export function metaOAuthScopes(): string {
     'pages_read_engagement',
     'pages_manage_posts',
     'pages_messaging',
-    'instagram_basic',
-    'instagram_content_publish',
-    'instagram_manage_messages',
     'business_management',
   ].join(',')
 }
