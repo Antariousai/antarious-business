@@ -23,7 +23,6 @@ import {
 import { Avatar } from '../components/Avatar'
 import {
   Button,
-  FieldInput,
   Modal,
   Page,
   PageHeader,
@@ -33,12 +32,14 @@ import {
   Tabs,
   statusTone,
 } from '../components/ui'
+import { FreyaArtifactReview } from '../components/FreyaArtifactReview'
 import { FreyaCreationAssist } from '../components/FreyaCreationAssist'
 import { useApp } from '../context/AppContext'
+import { useFreyaActivity } from '../context/FreyaActivityContext'
 import { useMoney } from '../context/MoneyContext'
+import { buildRevisePrompt } from '@/lib/freyaAskHandoff'
 import { freyaFillBill, freyaFillExpense, freyaFillInvoice } from '../lib/freyaCreationHelpers'
 import {
-  EXPENSE_CATEGORIES,
   agingBucket,
   billBalance,
   billStatusMeta,
@@ -682,25 +683,46 @@ function InvoiceDetail({ invoice }: { invoice: Invoice }) {
 
 function NewInvoiceModal({ onClose }: { onClose: () => void }) {
   const money = useMoney()
+  const { prefs } = useApp()
+  const { askFreya } = useFreyaActivity()
   const customers = money.parties.filter((p) => p.kind === 'customer')
   const [prompt, setPrompt] = useState('')
-  const [leaveToFreya, setLeaveToFreya] = useState(false)
-  const [customerId, setCustomerId] = useState(customers[0]?.id || '')
+  const [customerId] = useState(customers[0]?.id || '')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
-  const [dueDate, setDueDate] = useState('2026-07-30')
+  const [dueDate] = useState('2026-07-30')
+  const [freyaDrafted, setFreyaDrafted] = useState(false)
   const [applying, setApplying] = useState(false)
   const [building, setBuilding] = useState(false)
 
-  function applySemiAuto() {
+  const customerName = customers.find((c) => c.id === customerId)?.name || ''
+
+  function runFreyaFill() {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
       const filled = freyaFillInvoice(prompt)
       setDescription(filled.description)
       setAmount(filled.amount)
+      setFreyaDrafted(true)
       setApplying(false)
     }, 550)
+  }
+
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'invoice',
+        section,
+        tone: prefs.tone,
+        fields: {
+          Customer: customerName,
+          Description: description,
+          Amount: amount ? `৳${amount}` : '',
+          'Due date': dueDate,
+        },
+      }),
+    })
   }
 
   function submit(e: FormEvent) {
@@ -708,10 +730,14 @@ function NewInvoiceModal({ onClose }: { onClose: () => void }) {
     const customer = customers.find((c) => c.id === customerId)
     if (!customer) return
 
-    const filled = leaveToFreya ? freyaFillInvoice(prompt) : null
-    const desc = (filled?.description || description).trim()
-    const amt = Number(filled?.amount || amount)
-    if (!desc || !amt) return
+    if (!freyaDrafted && prompt.trim()) {
+      runFreyaFill()
+      return
+    }
+
+    const desc = description.trim()
+    const amt = Number(amount)
+    if (!desc || !amt || !freyaDrafted) return
 
     setBuilding(true)
     window.setTimeout(() => {
@@ -724,10 +750,10 @@ function NewInvoiceModal({ onClose }: { onClose: () => void }) {
       })
       setBuilding(false)
       onClose()
-    }, leaveToFreya ? 500 : 0)
+    }, 400)
   }
 
-  const canSubmit = leaveToFreya || (description.trim().length > 0 && Number(amount) > 0)
+  const canSubmit = freyaDrafted && description.trim().length > 0 && Number(amount) > 0
   const busy = applying || building
 
   return (
@@ -736,53 +762,37 @@ function NewInvoiceModal({ onClose }: { onClose: () => void }) {
         <FreyaCreationAssist
           prompt={prompt}
           onPromptChange={setPrompt}
-          leaveToFreya={leaveToFreya}
-          onLeaveToFreyaChange={setLeaveToFreya}
-          onApplyPrompt={applySemiAuto}
+          onApplyPrompt={runFreyaFill}
           applying={applying}
           disabled={busy}
           applyLabel="Freya, draft invoice from prompt"
           placeholder="e.g. Invoice for June wholesale — 40 kurtis, ৳48,000"
         />
-        {leaveToFreya ? (
+        {!freyaDrafted && !applying && (
           <p className="rounded-lg bg-sky-soft/50 px-3 py-2.5 text-[12px] text-muted">
-            Full auto — Freya drafts line items, amount, and description from your prompt.
+            Add a prompt and tap the arrow — Freya will draft the invoice for review.
           </p>
-        ) : (
-          <>
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Customer</label>
-              <select
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              >
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <FieldInput label="Description" value={description} onChange={setDescription} required />
-            <FieldInput label="Amount (৳)" value={amount} onChange={setAmount} required />
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Due date</label>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              />
-            </div>
-          </>
+        )}
+        {freyaDrafted && (
+          <FreyaArtifactReview
+            fields={[
+              { key: 'customer', label: 'Customer', value: customerName },
+              { key: 'description', label: 'Description', value: description },
+              { key: 'amount', label: 'Amount', value: amount ? `৳${amount}` : '' },
+              { key: 'dueDate', label: 'Due date', value: dueDate },
+            ]}
+            onAskFreya={() => handoff()}
+            onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
+            onRegenerate={runFreyaFill}
+            regenerating={applying}
+          />
         )}
         <button
           type="submit"
           disabled={!canSubmit || busy}
           className="h-11 w-full rounded-lg bg-sky font-bold text-white disabled:bg-sky-muted"
         >
-          {building ? 'Freya is drafting…' : leaveToFreya ? 'Let Freya create invoice' : 'Create invoice'}
+          {building ? 'Freya is drafting…' : 'Create invoice'}
         </button>
       </form>
     </Modal>
@@ -1139,18 +1149,22 @@ function BillDetail({ bill }: { bill: Bill }) {
 
 function NewBillModal({ onClose }: { onClose: () => void }) {
   const money = useMoney()
+  const { prefs } = useApp()
+  const { askFreya } = useFreyaActivity()
   const vendors = money.parties.filter((p) => p.kind === 'vendor')
   const [prompt, setPrompt] = useState('')
-  const [leaveToFreya, setLeaveToFreya] = useState(false)
-  const [vendorId, setVendorId] = useState(vendors[0]?.id || '')
+  const [vendorId] = useState(vendors[0]?.id || '')
   const [category, setCategory] = useState<ExpenseCategory>('Inventory')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
-  const [dueDate, setDueDate] = useState('2026-07-30')
+  const [dueDate] = useState('2026-07-30')
+  const [freyaDrafted, setFreyaDrafted] = useState(false)
   const [applying, setApplying] = useState(false)
   const [building, setBuilding] = useState(false)
 
-  function applySemiAuto() {
+  const vendorName = vendors.find((v) => v.id === vendorId)?.name || ''
+
+  function runFreyaFill() {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
@@ -1158,8 +1172,26 @@ function NewBillModal({ onClose }: { onClose: () => void }) {
       setDescription(filled.description)
       setAmount(filled.amount)
       setCategory(filled.category)
+      setFreyaDrafted(true)
       setApplying(false)
     }, 550)
+  }
+
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'bill',
+        section,
+        tone: prefs.tone,
+        fields: {
+          Vendor: vendorName,
+          Category: category,
+          Description: description,
+          Amount: amount ? `৳${amount}` : '',
+          'Due date': dueDate,
+        },
+      }),
+    })
   }
 
   function submit(e: FormEvent) {
@@ -1167,27 +1199,31 @@ function NewBillModal({ onClose }: { onClose: () => void }) {
     const vendor = vendors.find((v) => v.id === vendorId)
     if (!vendor) return
 
-    const filled = leaveToFreya ? freyaFillBill(prompt) : null
-    const desc = (filled?.description || description).trim()
-    const amt = Number(filled?.amount || amount)
-    if (!desc || !amt) return
+    if (!freyaDrafted && prompt.trim()) {
+      runFreyaFill()
+      return
+    }
+
+    const desc = description.trim()
+    const amt = Number(amount)
+    if (!desc || !amt || !freyaDrafted) return
 
     setBuilding(true)
     window.setTimeout(() => {
       money.createBill({
         vendorId: vendor.id,
         vendorName: vendor.name,
-        category: filled?.category ?? category,
+        category,
         description: desc,
         amount: amt,
         dueDate,
       })
       setBuilding(false)
       onClose()
-    }, leaveToFreya ? 500 : 0)
+    }, 400)
   }
 
-  const canSubmit = leaveToFreya || (description.trim().length > 0 && Number(amount) > 0)
+  const canSubmit = freyaDrafted && description.trim().length > 0 && Number(amount) > 0
   const busy = applying || building
 
   return (
@@ -1196,67 +1232,38 @@ function NewBillModal({ onClose }: { onClose: () => void }) {
         <FreyaCreationAssist
           prompt={prompt}
           onPromptChange={setPrompt}
-          leaveToFreya={leaveToFreya}
-          onLeaveToFreyaChange={setLeaveToFreya}
-          onApplyPrompt={applySemiAuto}
+          onApplyPrompt={runFreyaFill}
           applying={applying}
           disabled={busy}
           applyLabel="Freya, draft bill from prompt"
           placeholder="e.g. Banani Textiles invoice for July — fabric, ~৳16,600"
         />
-        {leaveToFreya ? (
+        {!freyaDrafted && !applying && (
           <p className="rounded-lg bg-sky-soft/50 px-3 py-2.5 text-[12px] text-muted">
-            Full auto — Freya categorizes and fills the bill from your prompt.
+            Add a prompt and tap the arrow — Freya will draft the bill for review.
           </p>
-        ) : (
-          <>
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Vendor</label>
-              <select
-                value={vendorId}
-                onChange={(e) => setVendorId(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              >
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              >
-                {EXPENSE_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <FieldInput label="Description" value={description} onChange={setDescription} required />
-            <FieldInput label="Amount (৳)" value={amount} onChange={setAmount} required />
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Due date</label>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              />
-            </div>
-          </>
+        )}
+        {freyaDrafted && (
+          <FreyaArtifactReview
+            fields={[
+              { key: 'vendor', label: 'Vendor', value: vendorName },
+              { key: 'category', label: 'Category', value: category },
+              { key: 'description', label: 'Description', value: description },
+              { key: 'amount', label: 'Amount', value: amount ? `৳${amount}` : '' },
+              { key: 'dueDate', label: 'Due date', value: dueDate },
+            ]}
+            onAskFreya={() => handoff()}
+            onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
+            onRegenerate={runFreyaFill}
+            regenerating={applying}
+          />
         )}
         <button
           type="submit"
           disabled={!canSubmit || busy}
           className="h-11 w-full rounded-lg bg-sky font-bold text-white disabled:bg-sky-muted"
         >
-          {building ? 'Freya is drafting…' : leaveToFreya ? 'Let Freya create bill' : 'Create bill'}
+          {building ? 'Freya is drafting…' : 'Create bill'}
         </button>
       </form>
     </Modal>
@@ -1265,18 +1272,22 @@ function NewBillModal({ onClose }: { onClose: () => void }) {
 
 function NewExpenseModal({ onClose }: { onClose: () => void }) {
   const money = useMoney()
+  const { prefs } = useApp()
+  const { askFreya } = useFreyaActivity()
   const [prompt, setPrompt] = useState('')
-  const [leaveToFreya, setLeaveToFreya] = useState(false)
   const [merchant, setMerchant] = useState('')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState<ExpenseCategory>('Other')
-  const [date, setDate] = useState('2026-07-16')
-  const [accountId, setAccountId] = useState(money.accounts[0]?.id || '')
+  const [date] = useState('2026-07-16')
+  const [accountId] = useState(money.accounts[0]?.id || '')
   const [notes, setNotes] = useState('')
+  const [freyaDrafted, setFreyaDrafted] = useState(false)
   const [applying, setApplying] = useState(false)
   const [building, setBuilding] = useState(false)
 
-  function applySemiAuto() {
+  const accountName = money.accounts.find((a) => a.id === accountId)?.name || ''
+
+  function runFreyaFill() {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
@@ -1285,35 +1296,58 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
       setAmount(filled.amount)
       setCategory(filled.category)
       if (filled.notes) setNotes(filled.notes)
+      setFreyaDrafted(true)
       setApplying(false)
     }, 550)
+  }
+
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'expense',
+        section,
+        tone: prefs.tone,
+        fields: {
+          Merchant: merchant,
+          Amount: amount ? `৳${amount}` : '',
+          Category: category,
+          Account: accountName,
+          Date: date,
+          Notes: notes,
+        },
+      }),
+    })
   }
 
   function submit(e: FormEvent) {
     e.preventDefault()
     if (!accountId) return
 
-    const filled = leaveToFreya ? freyaFillExpense(prompt) : null
-    const merch = (filled?.merchant || merchant).trim()
-    const amt = Number(filled?.amount || amount)
-    if (!merch || !amt) return
+    if (!freyaDrafted && prompt.trim()) {
+      runFreyaFill()
+      return
+    }
+
+    const merch = merchant.trim()
+    const amt = Number(amount)
+    if (!merch || !amt || !freyaDrafted) return
 
     setBuilding(true)
     window.setTimeout(() => {
       money.createExpense({
         merchant: merch,
         amount: amt,
-        category: filled?.category ?? category,
+        category,
         date,
         accountId,
-        notes: (filled?.notes || notes).trim() || undefined,
+        notes: notes.trim() || undefined,
       })
       setBuilding(false)
       onClose()
-    }, leaveToFreya ? 500 : 0)
+    }, 400)
   }
 
-  const canSubmit = leaveToFreya || (merchant.trim().length > 0 && Number(amount) > 0)
+  const canSubmit = freyaDrafted && merchant.trim().length > 0 && Number(amount) > 0
   const busy = applying || building
 
   return (
@@ -1322,68 +1356,39 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
         <FreyaCreationAssist
           prompt={prompt}
           onPromptChange={setPrompt}
-          leaveToFreya={leaveToFreya}
-          onLeaveToFreyaChange={setLeaveToFreya}
-          onApplyPrompt={applySemiAuto}
+          onApplyPrompt={runFreyaFill}
           applying={applying}
           disabled={busy}
           applyLabel="Freya, log expense from prompt"
           placeholder="e.g. New Market supply run for thread and buttons — ৳2,800"
         />
-        {leaveToFreya ? (
+        {!freyaDrafted && !applying && (
           <p className="rounded-lg bg-sky-soft/50 px-3 py-2.5 text-[12px] text-muted">
-            Full auto — Freya logs merchant, amount, and category from your prompt.
+            Add a prompt and tap the arrow — Freya will draft the expense for review.
           </p>
-        ) : (
-          <>
-            <FieldInput label="Merchant" value={merchant} onChange={setMerchant} required />
-            <FieldInput label="Amount (৳)" value={amount} onChange={setAmount} required />
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              >
-                {EXPENSE_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Account</label>
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              >
-                {money.accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-[12px] font-semibold text-ink">Date</label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[13px] outline-none focus:border-sky"
-              />
-            </div>
-            <FieldInput label="Notes" value={notes} onChange={setNotes} />
-          </>
+        )}
+        {freyaDrafted && (
+          <FreyaArtifactReview
+            fields={[
+              { key: 'merchant', label: 'Merchant', value: merchant },
+              { key: 'amount', label: 'Amount', value: amount ? `৳${amount}` : '' },
+              { key: 'category', label: 'Category', value: category },
+              { key: 'account', label: 'Account', value: accountName },
+              { key: 'date', label: 'Date', value: date },
+              { key: 'notes', label: 'Notes', value: notes },
+            ]}
+            onAskFreya={() => handoff()}
+            onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
+            onRegenerate={runFreyaFill}
+            regenerating={applying}
+          />
         )}
         <button
           type="submit"
           disabled={!canSubmit || busy}
           className="h-11 w-full rounded-lg bg-sky font-bold text-white disabled:bg-sky-muted"
         >
-          {building ? 'Freya is logging…' : leaveToFreya ? 'Let Freya add expense' : 'Add expense'}
+          {building ? 'Freya is logging…' : 'Add expense'}
         </button>
       </form>
     </Modal>

@@ -15,7 +15,10 @@ import {
 } from 'lucide-react'
 import { useTemplates } from '../context/TemplatesContext'
 import { useApp } from '../context/AppContext'
+import { useFreyaActivity } from '../context/FreyaActivityContext'
+import { FreyaArtifactReview } from '../components/FreyaArtifactReview'
 import { FreyaCreationAssist } from '../components/FreyaCreationAssist'
+import { buildRevisePrompt } from '@/lib/freyaAskHandoff'
 import { PageHero } from '../components/PageHero'
 import { Button, Modal } from '../components/ui'
 import { freyaFillTemplate, type FreyaBizContext } from '../lib/freyaCreationHelpers'
@@ -426,14 +429,15 @@ function NewTemplateModal({
   }) => void
 }) {
   const [prompt, setPrompt] = useState('')
-  const [leaveToFreya, setLeaveToFreya] = useState(false)
   const [name, setName] = useState('')
   const [structure, setStructure] = useState('[Hook] + [Detail] + [CTA]')
   const [visual, setVisual] = useState('')
   const [example, setExample] = useState('')
+  const [freyaDrafted, setFreyaDrafted] = useState(false)
   const [applying, setApplying] = useState(false)
   const [building, setBuilding] = useState(false)
   const { profile, prefs } = useApp()
+  const { askFreya } = useFreyaActivity()
   const bizCtx: FreyaBizContext = {
     businessName: profile?.businessName,
     industry: profile?.industry,
@@ -443,7 +447,7 @@ function NewTemplateModal({
     tone: prefs.tone,
   }
 
-  function applySemiAuto() {
+  function runFreyaFill() {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
@@ -452,37 +456,57 @@ function NewTemplateModal({
       setStructure(filled.structure)
       setVisual(filled.visual)
       setExample(filled.exampleCaption)
+      setFreyaDrafted(true)
       setApplying(false)
     }, 550)
   }
 
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'template',
+        section,
+        tone: prefs.tone,
+        fields: {
+          Name: name,
+          Structure: structure,
+          'Visual style': visual,
+          'Example caption': example,
+        },
+      }),
+    })
+  }
+
   function submit(e: FormEvent) {
     e.preventDefault()
-    setBuilding(true)
 
-    const filled = leaveToFreya ? freyaFillTemplate(prompt, bizCtx) : null
-    const templateName = (filled?.name || name).trim()
-    const templateStructure = (filled?.structure || structure).trim()
-    const templateVisual = (filled?.visual || visual).trim()
-
-    if (!templateName || !templateStructure || !templateVisual) {
-      setBuilding(false)
+    if (!freyaDrafted && prompt.trim()) {
+      runFreyaFill()
       return
     }
 
+    const templateName = name.trim()
+    const templateStructure = structure.trim()
+    const templateVisual = visual.trim()
+
+    if (!templateName || !templateStructure || !templateVisual || !freyaDrafted) {
+      return
+    }
+
+    setBuilding(true)
     window.setTimeout(() => {
       onCreate({
         name: templateName,
         structure: templateStructure,
         visual: templateVisual,
-        exampleCaption: (filled?.exampleCaption || example).trim() || undefined,
+        exampleCaption: example.trim() || undefined,
       })
       setBuilding(false)
-    }, leaveToFreya ? 600 : 0)
+    }, 400)
   }
 
   const canSubmit =
-    leaveToFreya || (name.trim().length > 0 && structure.trim().length > 0 && visual.trim().length > 0)
+    freyaDrafted && name.trim().length > 0 && structure.trim().length > 0 && visual.trim().length > 0
   const busy = applying || building
 
   return (
@@ -491,63 +515,32 @@ function NewTemplateModal({
         <FreyaCreationAssist
           prompt={prompt}
           onPromptChange={setPrompt}
-          leaveToFreya={leaveToFreya}
-          onLeaveToFreyaChange={setLeaveToFreya}
-          onApplyPrompt={applySemiAuto}
+          onApplyPrompt={runFreyaFill}
           applying={applying}
           disabled={busy}
           applyLabel="Freya, design template from prompt"
           placeholder="e.g. Warm weekend tray post — overhead shot, soft CTA"
         />
 
-        {leaveToFreya ? (
-          <div className="rounded-xl border border-dashed border-sky/30 bg-sky-soft/40 px-4 py-4 text-center">
-            <p className="text-[13px] font-semibold text-ink">Full auto mode</p>
-            <p className="mt-1 text-[12px] text-muted">
-              Structure, visual style, and example caption from your prompt.
-            </p>
-          </div>
-        ) : (
-          <>
-            <label className="block">
-              <span className="mb-1 block text-[12px] font-bold text-muted">Name</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Weekend tray drop"
-                className="w-full rounded-xl border border-sky/15 px-3.5 py-2.5 text-[14px] outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-                autoFocus
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[12px] font-bold text-muted">Structure formula</span>
-              <input
-                value={structure}
-                onChange={(e) => setStructure(e.target.value)}
-                className="w-full rounded-xl border border-sky/15 px-3.5 py-2.5 font-mono text-[13px] outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[12px] font-bold text-muted">Visual style</span>
-              <input
-                value={visual}
-                onChange={(e) => setVisual(e.target.value)}
-                placeholder="e.g. Overhead flat-lay, warm light"
-                className="w-full rounded-xl border border-sky/15 px-3.5 py-2.5 text-[14px] outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[12px] font-bold text-muted">
-                Example caption (optional)
-              </span>
-              <textarea
-                value={example}
-                onChange={(e) => setExample(e.target.value)}
-                rows={3}
-                className="w-full resize-none rounded-xl border border-sky/15 px-3.5 py-2.5 text-[14px] outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-              />
-            </label>
-          </>
+        {!freyaDrafted && !applying && (
+          <p className="rounded-xl border border-dashed border-sky/30 bg-sky-soft/30 px-4 py-3 text-[12px] text-muted">
+            Add a prompt and tap the arrow — Freya will draft the template for review.
+          </p>
+        )}
+
+        {freyaDrafted && (
+          <FreyaArtifactReview
+            fields={[
+              { key: 'name', label: 'Name', value: name },
+              { key: 'structure', label: 'Structure formula', value: structure },
+              { key: 'visual', label: 'Visual style', value: visual },
+              { key: 'example', label: 'Example caption', value: example },
+            ]}
+            onAskFreya={() => handoff()}
+            onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
+            onRegenerate={runFreyaFill}
+            regenerating={applying}
+          />
         )}
 
         <div className="flex justify-end gap-2 pt-2">
@@ -555,7 +548,7 @@ function NewTemplateModal({
             Cancel
           </Button>
           <Button type="submit" disabled={!canSubmit || busy}>
-            {building ? 'Freya is creating…' : leaveToFreya ? 'Let Freya create it' : 'Create template'}
+            {building ? 'Freya is creating…' : 'Create template'}
           </Button>
         </div>
       </form>

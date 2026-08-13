@@ -108,6 +108,22 @@ type ApiPost = {
   image_url?: string | null
   content_post_platforms?: { platform: string }[] | null
   content_assets?: { storage_path?: string; url?: string; mime_type?: string | null }[] | null
+  content_metric_snapshots?: Array<{
+    likes?: number | null
+    comments?: number | null
+    shares?: number | null
+    reach?: number | null
+    captured_at?: string | null
+  }> | null
+}
+
+function latestMetricSnapshot(row: ApiPost) {
+  const snaps = [...(row.content_metric_snapshots ?? [])].sort((a, b) => {
+    const ta = a.captured_at ? new Date(a.captured_at).getTime() : 0
+    const tb = b.captured_at ? new Date(b.captured_at).getTime() : 0
+    return tb - ta
+  })
+  return snaps[0] ?? null
 }
 
 export function mapApiPost(row: ApiPost): ContentPost {
@@ -115,6 +131,7 @@ export function mapApiPost(row: ApiPost): ContentPost {
   const status = (row.status === 'scheduled' || row.status === 'published' ? row.status : 'draft') as ContentPost['status']
   const platform = platforms[0] ?? 'Instagram'
   const fromAssets = (row.content_assets ?? []).map((a) => a.url).find(Boolean) ?? ''
+  const metrics = latestMetricSnapshot(row)
   return {
     id: row.id,
     platform,
@@ -126,10 +143,10 @@ export function mapApiPost(row: ApiPost): ContentPost {
     tag: row.tag ?? 'Food',
     scheduledAt: row.scheduled_at ?? undefined,
     date: formatPostDate(status, row.scheduled_at, row.published_at),
-    likes: 0,
-    views: 0,
-    comments: 0,
-    shares: 0,
+    likes: Math.max(0, Number(metrics?.likes ?? 0)),
+    views: Math.max(0, Number(metrics?.reach ?? 0)),
+    comments: Math.max(0, Number(metrics?.comments ?? 0)),
+    shares: Math.max(0, Number(metrics?.shares ?? 0)),
   }
 }
 

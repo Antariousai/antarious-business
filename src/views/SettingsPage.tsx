@@ -25,6 +25,7 @@ import {
   type PlanTier,
 } from '../data/planTiers'
 import { normalizeSocialPageUrl } from '@/lib/socialPageUrl'
+import { loadFreyaAskMode, saveFreyaAskMode, type FreyaAskMode } from '@/lib/freyaAskHandoff'
 import { useBackendMode } from '@/lib/backend/BackendModeContext'
 
 const TONES: { id: FreyaTone; label: string; blurb: string; accent: string }[] = [
@@ -110,6 +111,7 @@ export function SettingsPage() {
     customers: '',
   })
   const [profileDirty, setProfileDirty] = useState(false)
+  const [freyaAskMode, setFreyaAskMode] = useState<FreyaAskMode>(() => loadFreyaAskMode())
 
   const creditCap = aiCreditAllowance(planTier, billing.aiCreditsPurchased)
   const creditUsedPct = creditCap > 0 ? Math.min(100, Math.round((billing.aiCreditsUsed / creditCap) * 100)) : 0
@@ -966,6 +968,40 @@ export function SettingsPage() {
                 className={`mt-0.5 text-[11px] ${prefs.tone === t.id ? 'text-white/80' : 'text-muted'}`}
               >
                 {t.blurb}
+              </div>
+            </button>
+          ))}
+        </div>
+        <p className="mt-4 text-[12px] font-semibold text-slate-500">Ask Freya from create popups</p>
+        <p className="mt-1 text-[12px] text-muted">
+          When you tap Ask Freya on a draft, open chat with the prompt ready or send it automatically.
+        </p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {(
+            [
+              ['paste', 'Paste in composer', 'Prompt appears in chat — you review before sending'],
+              ['send', 'Send automatically', 'Freya receives the revise prompt right away'],
+            ] as const
+          ).map(([mode, label, blurb]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                setFreyaAskMode(mode)
+                saveFreyaAskMode(mode)
+                flashSaved()
+              }}
+              className={`rounded-xl px-3 py-3 text-left transition hover:brightness-105 ${
+                freyaAskMode === mode
+                  ? 'bg-gradient-to-br from-sky-bright to-sky text-white shadow-md'
+                  : 'border border-sky/10 bg-gradient-to-br from-white to-sky-soft/20 text-ink hover:border-sky/25'
+              }`}
+            >
+              <div className="text-[13px] font-bold">{label}</div>
+              <div
+                className={`mt-0.5 text-[11px] ${freyaAskMode === mode ? 'text-white/80' : 'text-muted'}`}
+              >
+                {blurb}
               </div>
             </button>
           ))}

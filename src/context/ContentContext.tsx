@@ -140,7 +140,7 @@ export function ContentProvider({ children }: { children: ReactNode }) {
             caption: input.caption,
             tag: input.tag || 'Promo',
             status: input.status || 'draft',
-            scheduled_at: input.status === 'draft' ? null : (input.scheduledAt ?? null),
+            scheduled_at: input.scheduledAt ?? null,
             platforms,
             assets: (input.assets ?? [])
               .filter((a) => a.path)

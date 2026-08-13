@@ -35,8 +35,11 @@ import {
   statusTone,
 } from '../components/ui'
 import { FreyaAvatar } from '../components/FreyaAvatar'
+import { FreyaArtifactReview } from '../components/FreyaArtifactReview'
 import { FreyaCreationAssist } from '../components/FreyaCreationAssist'
 import { AddDealModal } from '../components/AddDealModal'
+import { buildRevisePrompt } from '@/lib/freyaAskHandoff'
+import { useFreyaActivity } from '../context/FreyaActivityContext'
 import { AddFunnelStep } from '../components/AddFunnelStep'
 import { freyaFillCompany, freyaFillContact } from '../lib/freyaCreationHelpers'
 import { DealDetailPanel } from '../components/DealDetailPanel'
@@ -1356,17 +1359,19 @@ function AddContactModal({
   defaultSegment: CrmSegment
   onAdd: (input: { name: string; email: string; phone?: string; segment: CrmSegment; companyName?: string; notes?: string }) => void
 }) {
+  const { prefs } = useApp()
+  const { askFreya } = useFreyaActivity()
   const [prompt, setPrompt] = useState('')
-  const [leaveToFreya, setLeaveToFreya] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [companyName, setCompanyName] = useState('')
   const [segment, setSegment] = useState<CrmSegment>(defaultSegment)
   const [notes, setNotes] = useState('')
+  const [freyaDrafted, setFreyaDrafted] = useState(false)
   const [applying, setApplying] = useState(false)
 
-  function applySemiAuto() {
+  function runFreyaFill() {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
@@ -1377,27 +1382,51 @@ function AddContactModal({
       setCompanyName(filled.companyName || '')
       setNotes(filled.notes || '')
       setSegment(filled.segment)
+      setFreyaDrafted(true)
       setApplying(false)
     }, 550)
   }
 
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'contact',
+        section,
+        tone: prefs.tone,
+        fields: {
+          Name: name,
+          Email: email,
+          Phone: phone,
+          Segment: segment.toUpperCase(),
+          Company: companyName,
+          Notes: notes,
+        },
+      }),
+    })
+  }
+
   function submit(e: FormEvent) {
     e.preventDefault()
-    const filled = leaveToFreya ? freyaFillContact(prompt, segment) : null
-    const contactName = (filled?.name || name).trim()
-    if (!contactName) return
+
+    if (!freyaDrafted && prompt.trim()) {
+      runFreyaFill()
+      return
+    }
+
+    const contactName = name.trim()
+    if (!contactName || !freyaDrafted) return
     onAdd({
       name: contactName,
-      email: email || filled?.email || `${contactName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
-      phone: phone || filled?.phone,
-      segment: filled?.segment || segment,
-      companyName: companyName || filled?.companyName,
-      notes: notes || filled?.notes,
+      email: email || `${contactName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+      phone: phone || undefined,
+      segment,
+      companyName: companyName || undefined,
+      notes: notes || undefined,
     })
     onClose()
   }
 
-  const canSubmit = leaveToFreya || name.trim().length > 0
+  const canSubmit = freyaDrafted && name.trim().length > 0
 
   return (
     <Modal title="Add contact" onClose={onClose}>
@@ -1405,30 +1434,35 @@ function AddContactModal({
         <FreyaCreationAssist
           prompt={prompt}
           onPromptChange={setPrompt}
-          leaveToFreya={leaveToFreya}
-          onLeaveToFreyaChange={setLeaveToFreya}
-          onApplyPrompt={applySemiAuto}
+          onApplyPrompt={runFreyaFill}
           applying={applying}
           disabled={applying}
-          applyLabel="Freya, fill contact from prompt"
+          applyLabel="Freya, draft contact from prompt"
           placeholder="e.g. Event planner Sadia — corporate gift-pack lead from WhatsApp"
         />
-        {leaveToFreya ? (
+        {!freyaDrafted && !applying && (
           <p className="rounded-lg bg-sky-soft/50 px-3 py-2.5 text-[12px] text-muted">
-            Full auto — Freya adds the contact from your prompt.
+            Add a prompt and tap the arrow — Freya will draft the contact for review.
           </p>
-        ) : (
-          <>
-            <SegToggle value={segment} onChange={setSegment} />
-            <FieldInput label="Full name" value={name} onChange={setName} required />
-            <FieldInput label="Email" value={email} onChange={setEmail} />
-            <FieldInput label="Phone" value={phone} onChange={setPhone} />
-            {segment === 'b2b' && <FieldInput label="Company" value={companyName} onChange={setCompanyName} />}
-            <FieldInput label="Notes" value={notes} onChange={setNotes} />
-          </>
+        )}
+        {freyaDrafted && (
+          <FreyaArtifactReview
+            fields={[
+              { key: 'name', label: 'Full name', value: name },
+              { key: 'email', label: 'Email', value: email },
+              { key: 'phone', label: 'Phone', value: phone },
+              { key: 'segment', label: 'Segment', value: segment.toUpperCase() },
+              { key: 'company', label: 'Company', value: companyName },
+              { key: 'notes', label: 'Notes', value: notes },
+            ]}
+            onAskFreya={() => handoff()}
+            onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
+            onRegenerate={runFreyaFill}
+            regenerating={applying}
+          />
         )}
         <button type="submit" disabled={!canSubmit || applying} className="h-11 w-full rounded-lg bg-sky font-bold text-white disabled:bg-sky-muted">
-          {leaveToFreya ? 'Let Freya add contact' : 'Save contact'}
+          Save contact
         </button>
       </form>
     </Modal>
@@ -1494,15 +1528,17 @@ function AddCompanyModal({
   onClose: () => void
   onAdd: (input: { name: string; domain?: string; industry?: string; segment?: CrmSegment; notes?: string }) => void
 }) {
+  const { prefs } = useApp()
+  const { askFreya } = useFreyaActivity()
   const [prompt, setPrompt] = useState('')
-  const [leaveToFreya, setLeaveToFreya] = useState(false)
   const [name, setName] = useState('')
   const [domain, setDomain] = useState('')
   const [industry, setIndustry] = useState('Other')
   const [notes, setNotes] = useState('')
+  const [freyaDrafted, setFreyaDrafted] = useState(false)
   const [applying, setApplying] = useState(false)
 
-  function applySemiAuto() {
+  function runFreyaFill() {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
@@ -1511,26 +1547,48 @@ function AddCompanyModal({
       setDomain(filled.domain || '')
       setIndustry(filled.industry || 'Other')
       setNotes(filled.notes || '')
+      setFreyaDrafted(true)
       setApplying(false)
     }, 550)
   }
 
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'company',
+        section,
+        tone: prefs.tone,
+        fields: {
+          'Company name': name,
+          Domain: domain,
+          Industry: industry,
+          Notes: notes,
+        },
+      }),
+    })
+  }
+
   function submit(e: FormEvent) {
     e.preventDefault()
-    const filled = leaveToFreya ? freyaFillCompany(prompt) : null
-    const company = (filled?.name || name).trim()
-    if (!company) return
+
+    if (!freyaDrafted && prompt.trim()) {
+      runFreyaFill()
+      return
+    }
+
+    const company = name.trim()
+    if (!company || !freyaDrafted) return
     onAdd({
       name: company,
-      domain: domain || filled?.domain,
-      industry: industry || filled?.industry,
+      domain: domain || undefined,
+      industry: industry || undefined,
       segment: 'b2b',
-      notes: notes || filled?.notes,
+      notes: notes || undefined,
     })
     onClose()
   }
 
-  const canSubmit = leaveToFreya || name.trim().length > 0
+  const canSubmit = freyaDrafted && name.trim().length > 0
 
   return (
     <Modal title="Add company" onClose={onClose}>
@@ -1538,28 +1596,33 @@ function AddCompanyModal({
         <FreyaCreationAssist
           prompt={prompt}
           onPromptChange={setPrompt}
-          leaveToFreya={leaveToFreya}
-          onLeaveToFreyaChange={setLeaveToFreya}
-          onApplyPrompt={applySemiAuto}
+          onApplyPrompt={runFreyaFill}
           applying={applying}
           disabled={applying}
-          applyLabel="Freya, fill company from prompt"
+          applyLabel="Freya, draft company from prompt"
           placeholder="e.g. Local office park — potential weekly gift-pack account"
         />
-        {leaveToFreya ? (
+        {!freyaDrafted && !applying && (
           <p className="rounded-lg bg-sky-soft/50 px-3 py-2.5 text-[12px] text-muted">
-            Full auto — Freya adds the company from your prompt.
+            Add a prompt and tap the arrow — Freya will draft the company for review.
           </p>
-        ) : (
-          <>
-            <FieldInput label="Company name" value={name} onChange={setName} required />
-            <FieldInput label="Domain" value={domain} onChange={setDomain} />
-            <FieldInput label="Industry" value={industry} onChange={setIndustry} />
-            <FieldInput label="Notes" value={notes} onChange={setNotes} />
-          </>
+        )}
+        {freyaDrafted && (
+          <FreyaArtifactReview
+            fields={[
+              { key: 'name', label: 'Company name', value: name },
+              { key: 'domain', label: 'Domain', value: domain },
+              { key: 'industry', label: 'Industry', value: industry },
+              { key: 'notes', label: 'Notes', value: notes },
+            ]}
+            onAskFreya={() => handoff()}
+            onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
+            onRegenerate={runFreyaFill}
+            regenerating={applying}
+          />
         )}
         <button type="submit" disabled={!canSubmit || applying} className="h-11 w-full rounded-lg bg-sky font-bold text-white disabled:bg-sky-muted">
-          {leaveToFreya ? 'Let Freya add company' : 'Save company'}
+          Save company
         </button>
       </form>
     </Modal>

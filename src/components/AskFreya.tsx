@@ -45,6 +45,7 @@ import {
   type FreyaChatStore,
   type FreyaStoredMsg,
 } from '@/lib/freyaChatThreads'
+import { loadFreyaAskMode } from '@/lib/freyaAskHandoff'
 
 type ChatMsg = {
   id: string
@@ -325,6 +326,8 @@ export function AskFreya() {
     waitingCount,
     approveAll,
     refresh: refreshActivity,
+    chatHandoff,
+    clearChatHandoff,
   } = useFreyaActivity()
   const { approveAllDrafts, refresh: refreshInbox } = useInbox()
   const { overdueInvoices, refresh: refreshMoney } = useMoney()
@@ -753,6 +756,22 @@ export function AskFreya() {
     setMessages((prev) => [...prev, you, reply])
   }
 
+  // Create/edit popups hand off into this chat (paste or auto-send per Settings).
+  useEffect(() => {
+    if (!chatHandoff?.prompt?.trim()) return
+    const mode = chatHandoff.mode ?? loadFreyaAskMode()
+    const text = chatHandoff.prompt.trim()
+    clearChatHandoff()
+    setHistoryOpen(false)
+    setPanelTab('chat')
+    if (mode === 'send') {
+      window.setTimeout(() => send(undefined, text), 40)
+    } else {
+      setDraft(text)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handoff is one-shot
+  }, [chatHandoff])
+
   function onFabPointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
     e.currentTarget.setPointerCapture(e.pointerId)
     dragRef.current = {
@@ -900,10 +919,10 @@ export function AskFreya() {
               : 'Ask Freya'
           }
           title="Ask Freya · drag to move"
-          className={`freya-fab-bob fixed z-40 flex touch-none items-center justify-center rounded-full bg-sky text-white ring-2 ring-white/90 select-none ${
+          className={`freya-fab-bob fixed z-40 flex touch-none items-center justify-center rounded-full bg-transparent select-none ${
             dragging
-              ? 'dragging scale-105 cursor-grabbing shadow-xl shadow-sky/45'
-              : 'cursor-grab shadow-[0_10px_28px_-6px_rgba(2,132,199,0.55)] hover:bg-sky-bright hover:shadow-[0_14px_32px_-6px_rgba(2,132,199,0.65)]'
+              ? 'dragging scale-105 cursor-grabbing'
+              : 'cursor-grab hover:scale-[1.04]'
           }`}
           style={{
             left: pos.x,
@@ -912,10 +931,14 @@ export function AskFreya() {
             height: fabSize(isStarter).h,
           }}
         >
-          <div className="relative">
-            <FreyaAvatar size={isStarter ? 40 : 36} online />
+          <div className="relative drop-shadow-[0_8px_20px_rgba(2,132,199,0.35)]">
+            <FreyaAvatar
+              size={isStarter ? 52 : 48}
+              online
+              className="!ring-2 !ring-white shadow-sm"
+            />
             {waitingCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-sunshine px-1 text-[10px] font-bold text-navy-deep ring-2 ring-white">
+              <span className="absolute -top-0.5 -right-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-sunshine px-1 text-[10px] font-bold text-navy-deep shadow-sm">
                 {waitingCount > 9 ? '9+' : waitingCount}
               </span>
             )}

@@ -1,22 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { Film, ImagePlus, Upload, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { FreyaArtifactReview } from './FreyaArtifactReview'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
-import { FreyaDraftReview, type FreyaDraftSection } from './FreyaDraftReview'
 import { PlatformIcon } from './PlatformIcon'
-import { PLATFORM_OPTIONS, type ContentPost, type Platform } from '../data/mockData'
+import { type ContentPost, type Platform } from '../data/mockData'
 import { useApp } from '../context/AppContext'
 import { postPlatforms, type SavePostInput, useContent } from '../context/ContentContext'
+import { useFreyaActivity } from '../context/FreyaActivityContext'
 import { useBackendMode } from '@/lib/backend/BackendModeContext'
 import { uploadPostMedia } from '@/lib/mediaUpload'
+import { buildRevisePrompt } from '@/lib/freyaAskHandoff'
 import {
   freyaDraftCaption,
   freyaPickPlatforms,
   freyaPickPostTag,
   type FreyaBizContext,
 } from '../lib/freyaCreationHelpers'
-
-const TAGS = ['Food', 'Product', 'Lifestyle', 'Coffee']
 
 type UploadedFile = {
   id: string
@@ -59,6 +59,7 @@ export function CreatePostModal({
 }) {
   const { createPost, updatePost } = useContent()
   const { prefs, profile } = useApp()
+  const { askFreya } = useFreyaActivity()
   const { backend } = useBackendMode()
   const bizCtx: FreyaBizContext = {
     businessName: profile?.businessName,
@@ -73,27 +74,23 @@ export function CreatePostModal({
   const isEdit = Boolean(post)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadsRef = useRef<UploadedFile[]>([])
-  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const [prompt, setPrompt] = useState(initialPrompt)
-  const [leaveToFreya, setLeaveToFreya] = useState(isEdit ? false : initialLeaveToFreya)
   const [platforms, setPlatforms] = useState<Platform[]>(() => {
     if (post) return postPlatforms(post)
     if (connectedPlatforms.length) return [connectedPlatforms[0]!]
     if (bizCtx.platforms?.length) return [bizCtx.platforms[0]!]
-    // Always have a target channel for drafts even before OAuth connect.
     return ['Facebook', 'Instagram']
   })
   const [caption, setCaption] = useState(post?.caption ?? initialCaption)
   const [tag, setTag] = useState(post?.tag ?? 'Food')
-  const [schedule, setSchedule] = useState(post?.scheduledAt ?? '')
+  const [schedule] = useState(post?.scheduledAt ?? '')
   const [uploads, setUploads] = useState<UploadedFile[]>(
     post?.image
       ? [{ id: 'existing', url: post.image, name: 'Current media', kind: 'image' as const }]
       : [],
   )
-  const [freyaDrafted, setFreyaDrafted] = useState(false)
-  const [showManualEditor, setShowManualEditor] = useState(isEdit)
+  const [freyaDrafted, setFreyaDrafted] = useState(isEdit)
   const [applying, setApplying] = useState(false)
   const [building, setBuilding] = useState(false)
   const [mediaError, setMediaError] = useState<string | null>(null)
@@ -117,7 +114,6 @@ export function CreatePostModal({
       setTag(freyaPickPostTag(prompt))
       setPlatforms(freyaPickPlatforms(prompt, bizCtx))
       setFreyaDrafted(true)
-      setShowManualEditor(false)
       setApplying(false)
     }, 550)
   }
@@ -129,28 +125,20 @@ export function CreatePostModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function handleLeaveToFreyaChange(value: boolean) {
-    setLeaveToFreya(value)
-    if (value) {
-      setShowManualEditor(false)
-      if (prompt.trim()) runFreyaFill()
-    } else {
-      setShowManualEditor(true)
-    }
-  }
-
-  function openEditor(section: FreyaDraftSection) {
-    setShowManualEditor(true)
-    window.setTimeout(() => {
-      const key = section === 'all' ? 'platforms' : section
-      sectionRefs.current[key]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 50)
-  }
-
-  function togglePlatform(p: Platform) {
-    setPlatforms((prev) =>
-      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
-    )
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'post',
+        section,
+        tone: prefs.tone,
+        fields: {
+          Caption: caption,
+          Platforms: platforms.join(', '),
+          Tag: tag,
+          Schedule: schedule || 'Publish when ready',
+        },
+      }),
+    })
   }
 
   async function addFiles(fileList: FileList | null) {
@@ -233,12 +221,7 @@ export function CreatePostModal({
   }
 
   async function handleSubmit(action: 'save' | 'publish') {
-    if (!isEdit && leaveToFreya && !freyaDrafted && prompt.trim()) {
-      runFreyaFill()
-      return
-    }
-
-    if (isEdit && leaveToFreya && !freyaDrafted && prompt.trim()) {
+    if (!freyaDrafted && prompt.trim()) {
       runFreyaFill()
       return
     }
@@ -246,7 +229,6 @@ export function CreatePostModal({
     let status: ContentPost['status']
     let republish = false
 
-    // Without a connected channel, everything stays a draft.
     if (!hasConnectedPlatform) {
       status = 'draft'
       republish = false
@@ -262,7 +244,6 @@ export function CreatePostModal({
       republish = action === 'publish'
     }
 
-    // Publishing only to connected platforms
     const publishPlatforms =
       status === 'draft'
         ? platforms
@@ -304,16 +285,14 @@ export function CreatePostModal({
   const busy = applying || building
   const hasCaption = caption.trim().length > 0
   const hasMedia = uploads.length > 0
-  const fullAutoReady = !leaveToFreya || freyaDrafted || showManualEditor
-  // Save draft only needs a caption (+ Freya done if auto mode still showing review).
-  const canSave = hasCaption && (!leaveToFreya || freyaDrafted || showManualEditor)
+  const canSave = hasCaption && freyaDrafted
   const selectedConnected = platforms.filter((p) => connectedPlatforms.includes(p))
   const canPublish =
     hasConnectedPlatform &&
     selectedConnected.length > 0 &&
     hasCaption &&
     hasMedia &&
-    fullAutoReady
+    freyaDrafted
   const isLivePost = post?.status === 'published' || post?.status === 'scheduled'
   const publishLabel = !hasConnectedPlatform
     ? 'Connect a channel to publish'
@@ -324,8 +303,6 @@ export function CreatePostModal({
       : isLivePost
         ? 'Republish Now'
         : 'Publish Now'
-  const showReview = leaveToFreya && freyaDrafted && !showManualEditor
-  const showManualFields = !leaveToFreya || showManualEditor
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
@@ -335,7 +312,7 @@ export function CreatePostModal({
             <h2 className="text-[18px] font-bold text-ink">{isEdit ? 'Edit post' : 'Create a post'}</h2>
             <p className="text-[12px] text-muted">
               {isEdit
-                ? 'Edit anytime — save changes or republish live. Freya can re-draft too.'
+                ? 'Review Freya&apos;s draft — use Ask Freya to change copy or targeting.'
                 : 'Freya drafts captions · you upload images, GIFs, or video'}
             </p>
           </div>
@@ -451,19 +428,11 @@ export function CreatePostModal({
           <FreyaCreationAssist
             prompt={prompt}
             onPromptChange={setPrompt}
-            leaveToFreya={leaveToFreya}
-            onLeaveToFreyaChange={handleLeaveToFreyaChange}
             onApplyPrompt={runFreyaFill}
             applying={applying}
             disabled={busy}
             applyLabel={
-              isEdit
-                ? leaveToFreya
-                  ? 'Freya, re-draft post from prompt'
-                  : 'Freya, update caption from prompt'
-                : leaveToFreya
-                  ? 'Freya, draft post from prompt'
-                  : 'Freya, write caption from prompt'
+              isEdit ? 'Freya, re-draft post from prompt' : 'Freya, draft post from prompt'
             }
             placeholder={
               isEdit
@@ -472,128 +441,49 @@ export function CreatePostModal({
             }
           />
 
-          {leaveToFreya && !freyaDrafted && !applying && (
+          {!freyaDrafted && !applying && (
             <p className="rounded-xl border border-dashed border-sky/30 bg-sky-soft/30 px-4 py-3 text-[12px] text-muted">
               {isEdit
-                ? 'Tap the arrow — Freya will re-draft from your prompt for you to review before republishing.'
-                : 'Add a prompt and tap the arrow — Freya will draft your post for review. Manual fields stay hidden until she\'s done.'}
+                ? 'Add a prompt and tap the arrow to re-draft, or save as-is. Use Ask Freya on the review card to tweak fields.'
+                : 'Add a prompt and tap the arrow — Freya will draft your post for review.'}
             </p>
           )}
 
-          {showReview && (
-            <FreyaDraftReview
-              platforms={platforms}
-              caption={caption}
-              tag={tag}
-              schedule={schedule}
-              onEdit={openEditor}
+          {freyaDrafted && (
+            <FreyaArtifactReview
+              title={isEdit ? "Freya's draft (current post)" : "Freya's draft"}
+              fields={[
+                {
+                  key: 'platforms',
+                  label: 'Platforms',
+                  value: platforms.join(', '),
+                  children: (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {platforms.map((p) => (
+                        <span
+                          key={p}
+                          className="inline-flex items-center gap-1 rounded-full bg-sky-soft px-2 py-0.5 text-[12px] font-semibold text-sky-bright"
+                        >
+                          <PlatformIcon platform={p} size={13} />
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  ),
+                },
+                { key: 'caption', label: 'Caption', value: caption },
+                { key: 'tag', label: 'Tag', value: tag },
+                {
+                  key: 'schedule',
+                  label: 'Schedule',
+                  value: schedule || 'Publish when ready',
+                },
+              ]}
+              onAskFreya={() => handoff()}
+              onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
               onRegenerate={runFreyaFill}
               regenerating={applying}
             />
-          )}
-
-          {showManualFields && (
-            <>
-              {!isEdit && leaveToFreya && freyaDrafted && (
-                <button
-                  type="button"
-                  onClick={() => setShowManualEditor(false)}
-                  className="text-[12px] font-semibold text-sky hover:underline"
-                >
-                  ← Back to Freya&apos;s draft review
-                </button>
-              )}
-
-              <div ref={(el) => { sectionRefs.current.platforms = el }}>
-                <label className="mb-2 block text-[13px] font-semibold text-ink">
-                  Platforms{' '}
-                  <span className="font-normal text-muted">
-                    {hasConnectedPlatform
-                      ? '(connected channels can publish)'
-                      : '(optional for drafts)'}
-                  </span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {PLATFORM_OPTIONS.map((p) => {
-                    const on = platforms.includes(p)
-                    const linked = connectedPlatforms.includes(p)
-                    return (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => togglePlatform(p)}
-                        className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-semibold transition ${
-                          on
-                            ? 'border-sky bg-sky-soft text-sky-bright'
-                            : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                        }`}
-                      >
-                        <PlatformIcon platform={p} size={15} />
-                        {p}
-                        {linked && (
-                          <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
-                            linked
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div ref={(el) => { sectionRefs.current.caption = el }}>
-                <label className="mb-2 block text-[13px] font-semibold text-ink">Caption</label>
-                <textarea
-                  value={caption}
-                  onChange={(e) => setCaption(e.target.value)}
-                  rows={4}
-                  placeholder="Write or edit your caption"
-                  className="w-full resize-none rounded-xl border border-slate-200 px-3.5 py-3 text-[14px] outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-                />
-              </div>
-
-              <div ref={(el) => { sectionRefs.current.tag = el }}>
-                <label className="mb-2 block text-[13px] font-semibold text-ink">Tag</label>
-                <div className="flex flex-wrap gap-2">
-                  {TAGS.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setTag(t)}
-                      className={`rounded-full px-3.5 py-1.5 text-[12px] font-semibold ${
-                        tag === t ? 'bg-sky text-white' : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div ref={(el) => { sectionRefs.current.schedule = el }}>
-                <label className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
-                  Schedule for (optional)
-                </label>
-                <input
-                  type="datetime-local"
-                  value={schedule}
-                  onChange={(e) => setSchedule(e.target.value)}
-                  disabled={!hasConnectedPlatform}
-                  className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20 disabled:bg-slate-50 disabled:text-slate-400"
-                />
-                {!hasConnectedPlatform ? (
-                  <p className="mt-1.5 text-[11px] text-muted">
-                    Scheduling unlocks after you connect a channel.
-                  </p>
-                ) : schedule ? (
-                  <p className="mt-1.5 text-[11px] text-muted">
-                    {isLivePost
-                      ? 'Reschedule applies when you republish — Save keeps the current live time.'
-                      : 'Scheduled time applies when you publish — Save draft keeps it unpublished.'}
-                  </p>
-                ) : null}
-              </div>
-            </>
           )}
         </div>
 

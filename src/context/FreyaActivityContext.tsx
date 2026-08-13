@@ -40,6 +40,12 @@ function save(items: FreyaActivityItem[]) {
 export type ActivityFilter = 'everything' | 'waiting' | 'done' | 'working'
 export type FreyaPanelTab = 'chat' | 'activity'
 
+export type FreyaChatHandoff = {
+  prompt: string
+  label?: string
+  mode?: 'paste' | 'send'
+}
+
 interface FreyaActivityContextValue {
   items: FreyaActivityItem[]
   filter: ActivityFilter
@@ -59,6 +65,10 @@ interface FreyaActivityContextValue {
   openPanel: (tab?: FreyaPanelTab) => void
   closePanel: () => void
   setPanelTab: (tab: FreyaPanelTab) => void
+  /** Open Ask Freya chat with a prompt/context from a create modal. */
+  askFreya: (handoff: FreyaChatHandoff) => void
+  chatHandoff: FreyaChatHandoff | null
+  clearChatHandoff: () => void
 }
 
 const FreyaActivityContext = createContext<FreyaActivityContextValue | null>(null)
@@ -69,6 +79,7 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
   const [filter, setFilter] = useState<ActivityFilter>('everything')
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<FreyaPanelTab>('chat')
+  const [chatHandoff, setChatHandoff] = useState<FreyaChatHandoff | null>(null)
 
   const refresh = useCallback(async () => {
     if (!backend) return
@@ -220,6 +231,14 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
 
   const closePanel = useCallback(() => setPanelOpen(false), [])
 
+  const askFreya = useCallback((handoff: FreyaChatHandoff) => {
+    setChatHandoff(handoff)
+    setPanelTab('chat')
+    setPanelOpen(true)
+  }, [])
+
+  const clearChatHandoff = useCallback(() => setChatHandoff(null), [])
+
   const waitingCount = items.filter((i) => i.status === 'waiting').length
   const workingCount = items.filter((i) => i.status === 'working').length
   const doneCount = items.filter((i) => i.status === 'done').length
@@ -251,6 +270,9 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
       openPanel,
       closePanel,
       setPanelTab,
+      askFreya,
+      chatHandoff,
+      clearChatHandoff,
     }),
     [
       items,
@@ -269,6 +291,9 @@ export function FreyaActivityProvider({ children }: { children: ReactNode }) {
       panelTab,
       openPanel,
       closePanel,
+      askFreya,
+      chatHandoff,
+      clearChatHandoff,
     ],
   )
 

@@ -125,6 +125,7 @@ export function CommandCentrePage() {
   const [seenStories, setSeenStories] = useState<Set<string>>(() => new Set())
   const [uploading, setUploading] = useState<'cover' | 'logo' | null>(null)
   const [brandError, setBrandError] = useState<string | null>(null)
+  const [showCoverDate, setShowCoverDate] = useState(false)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const logoInputRef = useRef<HTMLInputElement>(null)
 
@@ -155,6 +156,11 @@ export function CommandCentrePage() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
   const todayLabel = new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+  const coverDateLabel = new Date().toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
 
   function letFreyaRun() {
     approveAll()
@@ -281,10 +287,17 @@ export function CommandCentrePage() {
           />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0b1220] via-[#0b1220]/35 to-transparent" />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#0b1220]/50 via-transparent to-[#0b1220]/20" />
-          <span className="pointer-events-none absolute top-4 left-4 inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white/95 uppercase backdrop-blur-sm ring-1 ring-white/15">
-            <Sparkles className="h-3 w-3 text-sunshine" />
-            Today
-          </span>
+          <button
+            type="button"
+            onClick={() => setShowCoverDate((v) => !v)}
+            aria-pressed={showCoverDate}
+            title={showCoverDate ? 'Show Today' : 'Show full date'}
+            className={`absolute top-4 left-4 z-20 inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-bold tracking-wide text-white/95 backdrop-blur-sm ring-1 ring-white/15 transition hover:bg-black/60 ${
+              showCoverDate ? 'normal-case' : 'uppercase'
+            }`}
+          >
+            {showCoverDate ? coverDateLabel : 'Today'}
+          </button>
           {needsOk > 0 && (
             <span className="pointer-events-none absolute top-4 right-4 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 to-orange-400 px-2.5 py-1 text-[11px] font-bold text-navy-deep shadow-sm shadow-amber-400/40">
               <Clock className="h-3 w-3" />
@@ -368,21 +381,20 @@ export function CommandCentrePage() {
           <div className="min-w-0">
             <p className="text-[18px] font-bold tracking-tight md:text-[20px]">
               {greeting}, {owner}
-              {hour < 12 ? ' ☀️' : hour < 18 ? ' 🌤' : ' 🌙'}
             </p>
-            <p className="mt-1.5 max-w-2xl text-[14px] leading-relaxed text-white/75">
-              Here&apos;s what&apos;s happening at {biz}
-              {industry ? `, your ${industry.toLowerCase()}` : ''}.{' '}
+            <p className="mt-1.5 max-w-xl text-[14px] leading-snug text-white/75">
               {needsOk > 0 ? (
                 <>
-                  I&apos;ve got{' '}
-                  <span className="font-semibold text-sunshine">{needsOk}</span> things waiting for
-                  your OK.
+                  <span className="font-semibold text-sunshine">{needsOk}</span> waiting for your
+                  OK
+                  {goalLabels[0] ? <> · Focus: {goalLabels[0]}</> : null}
                 </>
               ) : (
-                <>You&apos;re clear — Freya&apos;s keeping things moving.</>
+                <>
+                  Nothing waiting
+                  {goalLabels[0] ? <> · Focus: {goalLabels[0]}</> : null}
+                </>
               )}
-              {goalLabels.length > 0 && <> Focus: {goalLabels.join(' · ')}.</>}
             </p>
             {socialChannels.length > 0 && (
               <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
@@ -422,34 +434,34 @@ export function CommandCentrePage() {
             <Link
               to="/app/content"
               state={{ openCreate: true }}
-              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-sky-bright to-cyan-400 px-4 py-2.5 text-[13px] font-bold text-white shadow-lg shadow-sky/45 hover:brightness-110"
+              className="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-gradient-to-r from-sky-bright to-cyan-400 px-4 text-[13px] font-bold leading-none text-white shadow-lg shadow-sky/45 hover:brightness-110"
             >
-              <ImageIcon className="h-3.5 w-3.5" />
+              <ImageIcon className="h-3.5 w-3.5 shrink-0" />
               New post
             </Link>
             {showGrowthTools && canAccess('campaigns') && (
               <Link
                 to="/app/campaigns"
-                className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-sky-bright to-coral px-4 py-2.5 text-[13px] font-bold text-white shadow-lg shadow-coral/40 hover:brightness-110"
+                className="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-gradient-to-r from-sky-bright to-coral px-4 text-[13px] font-bold leading-none text-white shadow-lg shadow-coral/40 hover:brightness-110"
               >
-                <Megaphone className="h-3.5 w-3.5" />
+                <Megaphone className="h-3.5 w-3.5 shrink-0" />
                 New campaign
               </Link>
             )}
             {showGrowthTools && canAccess('leads') && (
               <Link
                 to="/app/leads"
-                className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-orange-400 to-amber-300 px-4 py-2.5 text-[13px] font-bold text-navy-deep shadow-lg shadow-orange-400/40 hover:brightness-105"
+                className="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-gradient-to-r from-orange-400 to-amber-300 px-4 text-[13px] font-bold leading-none text-navy-deep shadow-lg shadow-orange-400/40 hover:brightness-105"
               >
-                <Users className="h-3.5 w-3.5" />
+                <Users className="h-3.5 w-3.5 shrink-0" />
                 Add interested person
               </Link>
             )}
             <Link
               to="/app/inbox"
-              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-emerald-600 to-emerald-400 px-4 py-2.5 text-[13px] font-bold text-white shadow-lg shadow-emerald-500/40 hover:brightness-110"
+              className="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-gradient-to-r from-emerald-600 to-emerald-400 px-4 text-[13px] font-bold leading-none text-white shadow-lg shadow-emerald-500/40 hover:brightness-110"
             >
-              <MessageSquare className="h-3.5 w-3.5" />
+              <MessageSquare className="h-3.5 w-3.5 shrink-0" />
               Check Messages
             </Link>
           </div>

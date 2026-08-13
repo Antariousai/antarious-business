@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, Fragment } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bookmark,
@@ -12,6 +12,7 @@ import {
   GripVertical,
   Heart,
   LayoutGrid,
+  Loader2,
   MessageCircle,
   MousePointerClick,
   Pencil,
@@ -19,12 +20,14 @@ import {
   Sparkles,
   TrendingUp,
 } from 'lucide-react'
-import { CALENDAR_EVENTS, type ContentPost } from '../data/mockData'
+import type { ContentPost } from '../data/mockData'
 import { CreatePostModal } from '../components/CreatePostModal'
 import { PageHero } from '../components/PageHero'
 import { PlatformIcon } from '../components/PlatformIcon'
 import { postPlatforms, useContent } from '../context/ContentContext'
 import { useTemplates } from '../context/TemplatesContext'
+import { ApiError, apiFetch } from '../lib/backend/api'
+import { useBackendMode } from '../lib/backend/BackendModeContext'
 
 type Tab = 'feed' | 'calendar' | 'insights'
 type Filter = 'all' | 'draft' | 'scheduled' | 'published'
@@ -110,16 +113,16 @@ export function ContentPage() {
 
   const topPosts = [...posts]
     .filter((p) => p.status === 'published')
-    .sort((a, b) => b.likes - a.likes)
+    .sort((a, b) => b.likes + b.comments + b.views - (a.likes + a.comments + a.views))
 
   const totals = topPosts.reduce(
     (acc, p) => ({
       likes: acc.likes + p.likes,
       views: acc.views + p.views,
       comments: acc.comments + p.comments,
-      clicks: acc.clicks + Math.round(p.views * 0.08),
+      shares: acc.shares + (p.shares ?? 0),
     }),
-    { likes: 0, views: 0, comments: 0, clicks: 0 },
+    { likes: 0, views: 0, comments: 0, shares: 0 },
   )
 
   return (
@@ -294,6 +297,25 @@ export function ContentPage() {
               </article>
             ))}
           </div>
+          {filtered.length === 0 && (
+            <div className="mt-2 rounded-2xl border border-dashed border-sky/30 bg-white px-6 py-14 text-center shadow-sm">
+              <LayoutGrid className="mx-auto h-9 w-9 text-sky/50" />
+              <h3 className="mt-3 text-[16px] font-bold text-ink">No activity yet</h3>
+              <p className="mx-auto mt-2 max-w-sm text-[13px] text-muted">
+                {filter === 'all'
+                  ? 'No posts here yet. Draft one with Freya to get started.'
+                  : `No ${filter} posts yet.`}
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-sky px-4 py-2.5 text-[13px] font-bold text-white hover:bg-sky-bright"
+              >
+                <Plus className="h-4 w-4" strokeWidth={3} />
+                New post
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -304,9 +326,7 @@ export function ContentPage() {
           topPosts={topPosts}
           totals={totals}
           onDraft={() => {
-            setCreateCaption(
-              'Close-up hero shot energy 🥐 Fresh batch, soft light, soft CTA — Freya style.',
-            )
+            setCreatePrompt('Draft a post based on what has been working for my business')
             setShowCreate(true)
           }}
         />
@@ -340,405 +360,248 @@ function ContentInsights({
   onDraft,
 }: {
   topPosts: ContentPost[]
-  totals: { likes: number; views: number; comments: number; clicks: number }
+  totals: { likes: number; views: number; comments: number; shares: number }
   onDraft: () => void
 }) {
-  const podium = topPosts.slice(0, 3)
+  const hasMetrics = totals.likes + totals.views + totals.comments + totals.shares > 0
+  const podium = topPosts.filter((p) => p.likes + p.views + p.comments > 0).slice(0, 3)
   const [first, second, third] = [podium[0], podium[1], podium[2]]
-  const engagementTotal = totals.likes + totals.comments + totals.clicks || 1
+  const engagementTotal = totals.likes + totals.comments + totals.shares
   const mix = [
-    { key: 'Likes', value: totals.likes, color: '#fb7185', pct: Math.round((totals.likes / engagementTotal) * 100) },
-    { key: 'Comments', value: totals.comments, color: '#fbbf24', pct: Math.round((totals.comments / engagementTotal) * 100) },
-    { key: 'Clicks', value: totals.clicks, color: '#38bdf8', pct: Math.round((totals.clicks / engagementTotal) * 100) },
+    { key: 'Likes', value: totals.likes, color: '#fb7185' },
+    { key: 'Comments', value: totals.comments, color: '#fbbf24' },
+    { key: 'Shares', value: totals.shares, color: '#38bdf8' },
   ]
-
-  const weekBars = [
-    { day: 'Mon', v: 42 },
-    { day: 'Tue', v: 55 },
-    { day: 'Wed', v: 48 },
-    { day: 'Thu', v: 72 },
-    { day: 'Fri', v: 88 },
-    { day: 'Sat', v: 96 },
-    { day: 'Sun', v: 64 },
-  ]
-  const maxBar = Math.max(...weekBars.map((b) => b.v))
-
-  const heat = [
-    [12, 18, 22, 40, 55, 70, 48],
-    [8, 14, 28, 52, 78, 92, 60],
-    [6, 10, 16, 30, 44, 58, 36],
-    [4, 8, 12, 20, 28, 34, 22],
-  ]
-  const heatRows = ['6am', '9am', '12pm', '6pm']
-  const heatDays = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-
-  function heatColor(v: number) {
-    if (v >= 80) return 'bg-rose-500'
-    if (v >= 60) return 'bg-orange-400'
-    if (v >= 40) return 'bg-amber-300'
-    if (v >= 20) return 'bg-sky-200'
-    return 'bg-slate-100'
-  }
+    .filter((m) => m.value > 0)
+    .map((m) => ({
+      ...m,
+      pct: engagementTotal > 0 ? Math.round((m.value / engagementTotal) * 100) : 0,
+    }))
 
   const pulse = [
-    {
-      label: 'Likes',
-      value: totals.likes,
-      delta: '+12%',
-      icon: Heart,
-      fill: 78,
-      days: [38, 52, 44, 61, 78, 96, 70],
-      tone: 'from-rose-500 to-orange-400',
-      soft: 'bg-rose-50 text-rose-600',
-      bar: 'bg-rose-400',
-    },
-    {
-      label: 'Reach',
-      value: totals.views,
-      delta: '+18%',
-      icon: Eye,
-      fill: 92,
-      days: [48, 55, 62, 70, 82, 100, 76],
-      tone: 'from-sky to-cyan-400',
-      soft: 'bg-sky-soft text-sky',
-      bar: 'bg-sky',
-    },
-    {
-      label: 'Clicks',
-      value: totals.clicks,
-      delta: '+9%',
-      icon: MousePointerClick,
-      fill: 64,
-      days: [22, 28, 26, 40, 48, 58, 42],
-      tone: 'from-sky-bright to-coral',
-      soft: 'bg-sky-soft text-sky-bright',
-      bar: 'bg-sky',
-    },
-    {
-      label: 'Comments',
-      value: totals.comments,
-      delta: '+5%',
-      icon: MessageCircle,
-      fill: 48,
-      days: [12, 16, 14, 22, 28, 34, 24],
-      tone: 'from-amber-400 to-orange-300',
-      soft: 'bg-amber-50 text-amber-700',
-      bar: 'bg-amber-400',
-    },
+    { label: 'Likes', value: totals.likes, icon: Heart, soft: 'bg-rose-50 text-rose-600', tone: 'from-rose-500 to-orange-400' },
+    { label: 'Reach', value: totals.views, icon: Eye, soft: 'bg-sky-soft text-sky', tone: 'from-sky to-cyan-400' },
+    { label: 'Comments', value: totals.comments, icon: MessageCircle, soft: 'bg-amber-50 text-amber-700', tone: 'from-amber-400 to-orange-300' },
+    { label: 'Shares', value: totals.shares, icon: MousePointerClick, soft: 'bg-sky-soft text-sky-bright', tone: 'from-sky-bright to-coral' },
   ]
+
+  if (!topPosts.length || !hasMetrics) {
+    return (
+      <div className="rounded-2xl border border-dashed border-sky/30 bg-white px-6 py-16 text-center shadow-sm">
+        <ChartColumn className="mx-auto h-10 w-10 text-sky/50" />
+        <h3 className="mt-4 text-[16px] font-bold text-ink">No activity yet</h3>
+        <p className="mx-auto mt-2 max-w-md text-[13px] text-muted">
+          {!topPosts.length
+            ? 'Publish a post and sync your channels — likes, reach, and comments will show up here.'
+            : 'Your published posts don’t have engagement synced yet. Connect Meta and sync insights to see real activity here.'}
+        </p>
+        <button
+          type="button"
+          onClick={onDraft}
+          className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-sky px-4 py-2.5 text-[13px] font-bold text-white hover:bg-sky-bright"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Draft with Freya
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">
-      {/* Visual podium */}
       <section className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
           <div>
-            <h3 className="text-[16px] font-bold text-ink">This week&apos;s winners</h3>
-            <p className="text-[12px] text-muted">Ranked by likes — tap into what people loved</p>
+            <h3 className="text-[16px] font-bold text-ink">Top posts</h3>
+            <p className="text-[12px] text-muted">Ranked by real likes, comments, and reach</p>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold text-emerald-600">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-soft px-3 py-1 text-[12px] font-bold text-sky">
             <TrendingUp className="h-3.5 w-3.5" />
-            +18% engagement
+            {(totals.likes + totals.comments).toLocaleString()} engagements
           </span>
         </div>
 
-        <div className="grid gap-3 p-4 md:grid-cols-3 md:items-end md:gap-4 md:p-6">
-          {[
-            { post: second, place: 2, height: 'md:min-h-[280px]', ring: 'ring-slate-200', badge: 'bg-slate-300 text-slate-800' },
-            { post: first, place: 1, height: 'md:min-h-[340px]', ring: 'ring-amber-300', badge: 'bg-amber-400 text-white' },
-            { post: third, place: 3, height: 'md:min-h-[240px]', ring: 'ring-orange-200', badge: 'bg-orange-300 text-orange-950' },
-          ].map(({ post, place, height, ring, badge }) =>
-            post ? (
-              <article
-                key={post.id}
-                className={`relative overflow-hidden rounded-2xl ${height} ${place === 1 ? 'md:order-2' : place === 2 ? 'md:order-1' : 'md:order-3'}`}
-              >
-                {post.image?.trim() ? (
-                  <img
-                    src={post.image}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-sky-soft via-white to-amber-50 text-[13px] font-semibold text-muted">
-                    No media
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-navy-deep/90 via-navy-deep/25 to-transparent" />
-                <div className={`absolute inset-0 ring-2 ${ring} rounded-2xl pointer-events-none`} />
-                <span
-                  className={`absolute top-3 left-3 flex h-8 w-8 items-center justify-center rounded-full text-[14px] font-extrabold shadow-md ${badge}`}
+        {podium.length === 0 ? (
+          <p className="px-5 py-8 text-center text-[13px] text-muted">No activity yet</p>
+        ) : (
+          <div className="grid gap-3 p-4 md:grid-cols-3 md:items-end md:gap-4 md:p-6">
+            {[
+              { post: second, place: 2, height: 'md:min-h-[280px]', ring: 'ring-slate-200', badge: 'bg-slate-300 text-slate-800' },
+              { post: first, place: 1, height: 'md:min-h-[340px]', ring: 'ring-amber-300', badge: 'bg-amber-400 text-white' },
+              { post: third, place: 3, height: 'md:min-h-[240px]', ring: 'ring-orange-200', badge: 'bg-orange-300 text-orange-950' },
+            ].map(({ post, place, height, ring, badge }) =>
+              post ? (
+                <article
+                  key={post.id}
+                  className={`relative overflow-hidden rounded-2xl ${height} ${place === 1 ? 'md:order-2' : place === 2 ? 'md:order-1' : 'md:order-3'}`}
                 >
-                  {place}
-                </span>
-                <div className="absolute inset-x-0 bottom-0 p-4 text-white">
-                  <p className="line-clamp-2 text-[14px] font-bold leading-snug drop-shadow">
-                    {post.caption}
-                  </p>
-                  <div className="mt-2 flex items-center gap-3 text-[12px] font-semibold text-white/90">
-                    <span className="inline-flex items-center gap-1">
-                      <Heart className="h-3.5 w-3.5 fill-rose-400 text-rose-400" /> {post.likes}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Eye className="h-3.5 w-3.5" /> {post.views.toLocaleString()}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <MessageCircle className="h-3.5 w-3.5" /> {post.comments}
-                    </span>
+                  {post.image?.trim() ? (
+                    <img src={post.image} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-sky-soft via-white to-amber-50 text-[13px] font-semibold text-muted">
+                      No media
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-navy-deep/90 via-navy-deep/25 to-transparent" />
+                  <div className={`pointer-events-none absolute inset-0 rounded-2xl ring-2 ${ring}`} />
+                  <span
+                    className={`absolute top-3 left-3 flex h-8 w-8 items-center justify-center rounded-full text-[14px] font-extrabold shadow-md ${badge}`}
+                  >
+                    {place}
+                  </span>
+                  <div className="absolute inset-x-0 bottom-0 p-4 text-white">
+                    <p className="line-clamp-2 text-[14px] font-bold leading-snug drop-shadow">{post.caption}</p>
+                    <div className="mt-2 flex items-center gap-3 text-[12px] font-semibold text-white/90">
+                      <span className="inline-flex items-center gap-1">
+                        <Heart className="h-3.5 w-3.5 fill-rose-400 text-rose-400" /> {post.likes}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <Eye className="h-3.5 w-3.5" /> {post.views.toLocaleString()}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <MessageCircle className="h-3.5 w-3.5" /> {post.comments}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </article>
-            ) : null,
-          )}
-        </div>
+                </article>
+              ) : null,
+            )}
+          </div>
+        )}
       </section>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Weekly engagement bars */}
         <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-[15px] font-bold text-ink">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-soft text-sky">
-                <ChartColumn className="h-4 w-4" />
-              </span>
-              Engagement by day
-            </h3>
-            <span className="text-[11px] font-bold text-slate-400">Last 7 days</span>
-          </div>
-          <div className="flex h-48 items-stretch gap-2.5">
-            {weekBars.map((b) => (
-              <div key={b.day} className="flex min-h-0 flex-1 flex-col items-center gap-2">
-                <div className="relative flex min-h-0 w-full flex-1 items-end justify-center">
-                  <div
-                    className={`w-full max-w-[44px] rounded-t-xl transition ${
-                      b.v === maxBar
-                        ? 'bg-gradient-to-t from-rose-500 to-orange-400 shadow-md shadow-rose-300/40'
-                        : 'bg-gradient-to-t from-sky to-sky-muted'
-                    }`}
-                    style={{ height: `${Math.max(8, (b.v / maxBar) * 100)}%` }}
-                    title={`${b.day}: ${b.v}`}
-                  />
-                </div>
-                <span
-                  className={`shrink-0 text-[11px] font-bold ${b.v === maxBar ? 'text-rose-500' : 'text-slate-400'}`}
-                >
-                  {b.day}
-                </span>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-center text-[12px] text-muted">
-            Saturdays win — Freya schedules your strongest posts then.
-          </p>
-        </section>
-
-        {/* Donut + mix */}
-        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-[15px] font-bold text-ink">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 text-rose-500">
-                <Heart className="h-4 w-4" />
-              </span>
-              Engagement mix
-            </h3>
-          </div>
-          <div className="flex flex-wrap items-center gap-6">
-            <div
-              className="relative h-36 w-36 shrink-0 rounded-full shadow-inner"
-              style={{
-                background: `conic-gradient(${mix
-                  .map((m, i) => {
-                    const start = mix.slice(0, i).reduce((a, x) => a + x.pct, 0)
-                    const end = start + m.pct
-                    return `${m.color} ${start}% ${end}%`
-                  })
-                  .join(', ')})`,
-              }}
-            >
-              <div className="absolute inset-[18%] flex flex-col items-center justify-center rounded-full bg-white shadow-sm">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Total</span>
-                <span className="text-[16px] font-extrabold text-ink">
-                  {(totals.likes + totals.comments).toLocaleString()}
-                </span>
-              </div>
-            </div>
-            <div className="min-w-0 flex-1 space-y-3">
-              {mix.map((m) => (
-                <div key={m.key}>
-                  <div className="mb-1 flex items-center justify-between text-[12px] font-bold">
-                    <span className="flex items-center gap-2 text-ink">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: m.color }} />
-                      {m.key}
-                    </span>
-                    <span className="text-slate-500">{m.pct}%</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${m.pct}%`, background: m.color }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      </div>
-
-      {/* Heatmap + sparklines */}
-      <div className="grid gap-5 lg:grid-cols-[1.2fr_1fr]">
-        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className="mb-4">
-            <h3 className="text-[15px] font-bold text-ink">Best time to post</h3>
-            <p className="text-[12px] text-muted">Hotter = more engagement from your audience</p>
-          </div>
-          <div className="overflow-x-auto">
-            <div className="inline-grid min-w-[280px] grid-cols-[48px_repeat(7,minmax(0,1fr))] gap-1.5">
-              <div />
-              {heatDays.map((d, i) => (
-                <div key={`${d}-${i}`} className="text-center text-[10px] font-bold text-slate-400">
-                  {d}
-                </div>
-              ))}
-              {heat.map((row, ri) => (
-                <Fragment key={heatRows[ri]}>
-                  <div className="flex items-center text-[10px] font-bold text-slate-400">
-                    {heatRows[ri]}
-                  </div>
-                  {row.map((v, ci) => (
-                    <div
-                      key={`${ri}-${ci}`}
-                      title={`${heatRows[ri]} ${heatDays[ci]} · ${v}`}
-                      className={`aspect-square rounded-lg ${heatColor(v)} transition hover:scale-105 hover:ring-2 hover:ring-white hover:ring-offset-1`}
-                    />
-                  ))}
-                </Fragment>
-              ))}
-            </div>
-          </div>
-          <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
-            <span>Cool</span>
-            <div className="flex gap-1">
-              {['bg-slate-100', 'bg-sky-200', 'bg-amber-300', 'bg-orange-400', 'bg-rose-500'].map((c) => (
-                <span key={c} className={`h-2.5 w-4 rounded ${c}`} />
-              ))}
-            </div>
-            <span>Hot</span>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:p-5">
-          <div className="mb-4 flex items-start justify-between gap-2">
-            <div>
-              <h3 className="text-[15px] font-bold text-ink">Audience pulse</h3>
-              <p className="text-[12px] text-muted">How each signal climbed this week</p>
-            </div>
-            <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-600">
-              All up
+          <h3 className="mb-4 flex items-center gap-2 text-[15px] font-bold text-ink">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-soft text-sky">
+              <ChartColumn className="h-4 w-4" />
             </span>
-          </div>
-
-          <div className="grid grid-cols-4 gap-2 sm:gap-3">
+            Totals
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
             {pulse.map((m) => {
               const Icon = m.icon
-              const dayMax = Math.max(...m.days)
               return (
-                <div key={m.label} className="flex min-w-0 flex-col">
-                  <div
-                    className={`relative flex aspect-[3/5] flex-col overflow-hidden rounded-2xl bg-gradient-to-b ${m.tone} p-2.5 text-white shadow-md sm:p-3`}
-                  >
-                    <div className="absolute -right-2 -bottom-2 opacity-20">
-                      <Icon className="h-14 w-14" strokeWidth={1.5} />
-                    </div>
-                    <span className="relative z-[1] flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
-                      <Icon className="h-3.5 w-3.5" />
-                    </span>
-                    <div className="relative z-[1] mt-auto">
-                      <p className="text-[10px] font-bold tracking-wide text-white/80 uppercase">
-                        {m.label}
-                      </p>
-                      <p className="truncate text-[15px] font-extrabold leading-tight sm:text-[17px]">
-                        {m.value >= 1000 ? `${(m.value / 1000).toFixed(1).replace(/\.0$/, '')}k` : m.value}
-                      </p>
-                      <p className="mt-0.5 text-[10px] font-bold text-white/90">{m.delta}</p>
-                    </div>
-                    <div className="relative z-[1] mt-2 h-1.5 overflow-hidden rounded-full bg-white/25">
-                      <div
-                        className="h-full rounded-full bg-white"
-                        style={{ width: `${Math.min(100, Math.max(18, m.fill))}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-2 flex h-10 items-end justify-between gap-0.5 px-0.5">
-                    {m.days.map((d, i) => (
-                      <div
-                        key={i}
-                        className={`w-full rounded-t-sm ${m.bar} opacity-80`}
-                        style={{ height: `${Math.max(15, (d / dayMax) * 100)}%` }}
-                        title={`${['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]} · ${d}`}
-                      />
-                    ))}
-                  </div>
-                  <div className="mt-1 flex justify-between px-0.5 text-[8px] font-bold text-slate-400">
-                    <span>M</span>
-                    <span>S</span>
-                  </div>
+                <div
+                  key={m.label}
+                  className={`rounded-2xl bg-gradient-to-br ${m.tone} p-4 text-white shadow-sm`}
+                >
+                  <Icon className="h-4 w-4 opacity-90" />
+                  <p className="mt-3 text-[11px] font-bold tracking-wide text-white/80 uppercase">{m.label}</p>
+                  <p className="text-[22px] font-extrabold leading-tight">
+                    {m.value >= 1000
+                      ? `${(m.value / 1000).toFixed(1).replace(/\.0$/, '')}k`
+                      : m.value.toLocaleString()}
+                  </p>
                 </div>
               )
             })}
           </div>
-
           <div className="mt-4 flex flex-wrap gap-2">
-            {pulse.map((m) => {
-              const Icon = m.icon
-              return (
-                <span
-                  key={`chip-${m.label}`}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${m.soft}`}
-                >
-                  <Icon className="h-3 w-3" />
-                  {m.label} {m.delta}
-                </span>
-              )
-            })}
+            {pulse
+              .filter((m) => m.value > 0)
+              .map((m) => {
+                const Icon = m.icon
+                return (
+                  <span
+                    key={`chip-${m.label}`}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${m.soft}`}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {m.label} {m.value.toLocaleString()}
+                  </span>
+                )
+              })}
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+          <h3 className="mb-4 flex items-center gap-2 text-[15px] font-bold text-ink">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 text-rose-500">
+              <Heart className="h-4 w-4" />
+            </span>
+            Engagement mix
+          </h3>
+          {mix.length === 0 ? (
+            <p className="text-[13px] text-muted">No likes, comments, or shares recorded yet.</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-6">
+              <div
+                className="relative h-36 w-36 shrink-0 rounded-full shadow-inner"
+                style={{
+                  background: `conic-gradient(${mix
+                    .map((m, i) => {
+                      const start = mix.slice(0, i).reduce((a, x) => a + x.pct, 0)
+                      const end = start + m.pct
+                      return `${m.color} ${start}% ${end}%`
+                    })
+                    .join(', ')})`,
+                }}
+              >
+                <div className="absolute inset-[18%] flex flex-col items-center justify-center rounded-full bg-white shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Total</span>
+                  <span className="text-[16px] font-extrabold text-ink">{engagementTotal.toLocaleString()}</span>
+                </div>
+              </div>
+              <div className="min-w-0 flex-1 space-y-3">
+                {mix.map((m) => (
+                  <div key={m.key}>
+                    <div className="mb-1 flex items-center justify-between text-[12px] font-bold">
+                      <span className="flex items-center gap-2 text-ink">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: m.color }} />
+                        {m.key}
+                      </span>
+                      <span className="text-slate-500">
+                        {m.value.toLocaleString()} · {m.pct}%
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-full rounded-full" style={{ width: `${m.pct}%`, background: m.color }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </div>
 
-      {/* Visual strip of more posts + Freya */}
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         <section className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm md:p-5">
-          <h3 className="mb-3 text-[15px] font-bold text-ink">More that performed</h3>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {topPosts.slice(3, 9).map((post) => (
-              <div key={post.id} className="group relative aspect-square overflow-hidden rounded-xl">
-                {post.image?.trim() ? (
-                  <img
-                    src={post.image}
-                    alt=""
-                    className="h-full w-full object-cover transition group-hover:scale-105"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-sky-soft to-amber-50 text-[11px] font-semibold text-muted">
-                    No media
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-90" />
-                <div className="absolute inset-x-0 bottom-0 p-2.5 text-white">
-                  <p className="line-clamp-2 text-[11px] font-semibold leading-snug">{post.caption}</p>
-                  <div className="mt-1 flex items-center gap-2 text-[10px] font-bold text-white/90">
-                    <span className="inline-flex items-center gap-0.5">
-                      <Heart className="h-3 w-3 fill-rose-400 text-rose-400" /> {post.likes}
-                    </span>
+          <h3 className="mb-3 text-[15px] font-bold text-ink">More published posts</h3>
+          {topPosts.slice(3, 9).length === 0 ? (
+            <p className="text-[13px] text-muted">Only your top posts so far.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {topPosts.slice(3, 9).map((post) => (
+                <div key={post.id} className="group relative aspect-square overflow-hidden rounded-xl">
+                  {post.image?.trim() ? (
+                    <img
+                      src={post.image}
+                      alt=""
+                      className="h-full w-full object-cover transition group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-sky-soft to-amber-50 text-[11px] font-semibold text-muted">
+                      No media
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-90" />
+                  <div className="absolute inset-x-0 bottom-0 p-2.5 text-white">
+                    <p className="line-clamp-2 text-[11px] font-semibold leading-snug">{post.caption}</p>
+                    <div className="mt-1 flex items-center gap-2 text-[10px] font-bold text-white/90">
+                      <span className="inline-flex items-center gap-0.5">
+                        <Heart className="h-3 w-3 fill-rose-400 text-rose-400" /> {post.likes}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy-mid via-[#16324a] to-[#0e7490] p-5 text-white shadow-lg shadow-sky/15">
-          <div className="pointer-events-none absolute -top-10 right-0 h-32 w-32 rounded-full bg-sunshine/20 blur-2xl" />
           {first?.image?.trim() ? (
             <img
               src={first.image}
@@ -748,12 +611,12 @@ function ContentInsights({
           ) : null}
           <div className="flex items-center gap-2 text-[11px] font-bold tracking-wide text-sky-muted uppercase">
             <Sparkles className="h-3.5 w-3.5 text-sunshine" />
-            Freya&apos;s take
+            Freya
           </div>
           <p className="mt-2 text-[14px] leading-relaxed font-medium">
-            Close-ups like your #1 get{' '}
-            <span className="rounded bg-sunshine/90 px-1 font-extrabold text-navy-deep">234%</span>{' '}
-            more love. I can draft your next 3 in that style.
+            {first
+              ? `Your top post has ${first.likes.toLocaleString()} likes and ${first.comments.toLocaleString()} comments. I can draft a follow-up in a similar style.`
+              : 'I can draft your next post from a short brief.'}
           </p>
           <button
             type="button"
@@ -761,7 +624,7 @@ function ContentInsights({
             className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2.5 text-[13px] font-bold text-sky hover:bg-sky-soft"
           >
             <Sparkles className="h-3.5 w-3.5" />
-            Freya, draft 3
+            Draft with Freya
           </button>
         </section>
       </div>
@@ -769,12 +632,16 @@ function ContentInsights({
   )
 }
 
+
 type CalView = 'day' | 'week' | 'month'
+type CalColor = 'pink' | 'blue' | 'mint' | 'amber' | 'coral'
 type CalEvent = {
   id: string
   day: number
   title: string
-  color: 'pink' | 'blue' | 'mint' | 'amber' | 'coral'
+  color: CalColor
+  time?: string
+  postId?: string
 }
 
 const CHIP: Record<string, string> = {
@@ -812,11 +679,22 @@ const WEEKDAY_TONE = [
 ]
 
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTH_NAME = 'July'
-const YEAR = 2026
-const MONTH = 6
-const TODAY = 16
-const DAYS_IN_MONTH = 31
+
+function colorForTag(tag: string): CalColor {
+  const t = tag.toLowerCase()
+  if (/(product|drop|arrival)/.test(t)) return 'pink'
+  if (/(promo|sale|offer|deal)/.test(t)) return 'blue'
+  if (/(community|bts|story|team)/.test(t)) return 'mint'
+  if (/(campaign|reel|ads)/.test(t)) return 'coral'
+  return 'amber'
+}
+
+function formatCalTime(iso?: string) {
+  if (!iso) return '10:00'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '10:00'
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
 
 function eventTime(id: string) {
   const n = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
@@ -834,9 +712,40 @@ function dayUnderPoint(x: number, y: number): number | null {
 }
 
 function ContentCalendar() {
-  const [events, setEvents] = useState<CalEvent[]>(() =>
-    CALENDAR_EVENTS.map((e, i) => ({ ...e, id: `ce${i}` })),
+  const { posts, refresh, createPost, updatePost } = useContent()
+  const { backend } = useBackendMode()
+  const calNow = useMemo(() => new Date(), [])
+  const YEAR = calNow.getFullYear()
+  const MONTH = calNow.getMonth()
+  const TODAY = calNow.getDate()
+  const DAYS_IN_MONTH = new Date(YEAR, MONTH + 1, 0).getDate()
+  const MONTH_NAME = calNow.toLocaleString('en-US', { month: 'long' })
+
+  const postsAsEvents = useMemo(() => {
+    const list: CalEvent[] = []
+    for (const p of posts) {
+      if (!p.scheduledAt) continue
+      const d = new Date(p.scheduledAt)
+      if (Number.isNaN(d.getTime()) || d.getFullYear() !== YEAR || d.getMonth() !== MONTH) continue
+      const title = (p.caption || p.tag || 'Post').replace(/\s+/g, ' ').trim().slice(0, 42)
+      list.push({
+        id: p.id,
+        postId: p.id,
+        day: d.getDate(),
+        title,
+        color: colorForTag(p.tag || 'Update'),
+        time: formatCalTime(p.scheduledAt),
+      })
+    }
+    return list
+  }, [posts, YEAR, MONTH])
+
+  const [dayOverrides, setDayOverrides] = useState<Record<string, number>>({})
+  const events = useMemo(
+    () => postsAsEvents.map((e) => ({ ...e, day: dayOverrides[e.id] ?? e.day })),
+    [postsAsEvents, dayOverrides],
   )
+
   const [view, setView] = useState<CalView>('month')
   const [focusDay, setFocusDay] = useState(TODAY)
   const [overDay, setOverDay] = useState<number | null>(null)
@@ -846,6 +755,7 @@ function ContentCalendar() {
   )
   const [moveToast, setMoveToast] = useState<string | null>(null)
   const [freyaNote, setFreyaNote] = useState<string | null>(null)
+  const [planning, setPlanning] = useState(false)
 
   const dragRef = useRef<{
     id: string
@@ -874,29 +784,129 @@ function ContentCalendar() {
   })
 
   function moveEvent(id: string, day: number) {
-    setEvents((list) => {
-      const prev = list.find((e) => e.id === id)
-      if (prev && prev.day !== day) {
-        window.setTimeout(() => {
-          setMoveToast(`Moved “${prev.title}” to ${MONTH_NAME} ${day}`)
-          setFocusDay(day)
-        }, 0)
-        window.setTimeout(() => setMoveToast(null), 2800)
-      }
-      return list.map((e) => (e.id === id ? { ...e, day } : e))
-    })
+    setDayOverrides((prev) => ({ ...prev, [id]: day }))
+    const prev = events.find((e) => e.id === id)
+    if (prev && prev.day !== day) {
+      window.setTimeout(() => {
+        setMoveToast(`Moved “${prev.title}” to ${MONTH_NAME} ${day}`)
+        setFocusDay(day)
+      }, 0)
+      window.setTimeout(() => setMoveToast(null), 2800)
+    }
+
+    const post = posts.find((p) => p.id === id)
+    if (post) {
+      const base = post.scheduledAt ? new Date(post.scheduledAt) : new Date(YEAR, MONTH, day, 10, 0)
+      const next = new Date(YEAR, MONTH, day, base.getHours(), base.getMinutes(), 0, 0)
+      void Promise.resolve(
+        updatePost(id, {
+          scheduledAt: next.toISOString(),
+          status: post.status === 'published' ? 'scheduled' : post.status,
+          caption: post.caption,
+          tag: post.tag || 'Update',
+          platforms: post.platforms?.length ? post.platforms : [post.platform],
+        }),
+      ).catch(() => {
+        setFreyaNote('Couldn’t save the new day. Try again.')
+      })
+    }
   }
 
-  function freyaPlanWeek() {
-    const extras: CalEvent[] = [
-      { id: `ce${Date.now()}`, day: 17, title: 'Eid kurti reel', color: 'mint' },
-      { id: `ce${Date.now() + 1}`, day: 19, title: '5am BTS story', color: 'coral' },
-      { id: `ce${Date.now() + 2}`, day: 22, title: 'Loyalty club CTA', color: 'blue' },
-    ]
-    setEvents((prev) => [...prev, ...extras])
-    setFreyaNote('Freya added 3 posts — grab the ⋮⋮ handle and drop them on any day.')
-    setView('week')
-    setFocusDay(17)
+  async function freyaPlanWeek() {
+    if (planning) return
+    setPlanning(true)
+    setFreyaNote(null)
+    try {
+      if (backend) {
+        const data = await apiFetch<{
+          ok: boolean
+          offline?: boolean
+          note?: string
+          posts?: Array<{ id: string; day: number; title: string }>
+        }>('/api/content/plan-week', {
+          method: 'POST',
+          body: JSON.stringify({ anchorDate: new Date(YEAR, MONTH, TODAY).toISOString() }),
+        })
+        await refresh()
+        setDayOverrides({})
+        const count = data.posts?.length ?? 0
+        const offlineBit = data.offline
+          ? ' (offline sketch — add an AI key for live Freya)'
+          : ''
+        setFreyaNote(
+          (data.note?.trim() ||
+            `Freya added ${count} draft${count === 1 ? '' : 's'} for your week.`) + offlineBit,
+        )
+        const firstDay = data.posts?.[0]?.day ?? TODAY
+        setView('week')
+        setFocusDay(Math.min(DAYS_IN_MONTH, Math.max(1, firstDay)))
+        return
+      }
+
+      const ideas = [
+        {
+          offset: 0,
+          hour: 10,
+          tag: 'Update',
+          caption: 'Fresh week energy — here’s what we’re sharing first. Message us if you want first pick.',
+        },
+        {
+          offset: 1,
+          hour: 11,
+          tag: 'Product',
+          caption: 'A closer look at something worth saving. Message us for details when you’re ready.',
+        },
+        {
+          offset: 3,
+          hour: 12,
+          tag: 'Tips',
+          caption: 'A quick tip you can use today. Reply if you want this tailored for you.',
+        },
+        {
+          offset: 5,
+          hour: 17,
+          tag: 'Promo',
+          caption: 'A little midweek love. Ask about this week’s pick and we’ll help you choose.',
+        },
+        {
+          offset: 6,
+          hour: 10,
+          tag: 'Community',
+          caption: 'Weekend plans? Come see what’s new or message us to set something aside.',
+        },
+      ]
+      for (const idea of ideas) {
+        const when = new Date(
+          YEAR,
+          MONTH,
+          Math.min(DAYS_IN_MONTH, TODAY + idea.offset),
+          idea.hour,
+          0,
+        )
+        await createPost({
+          caption: idea.caption,
+          tag: idea.tag,
+          image: '',
+          status: 'draft',
+          scheduledAt: when.toISOString(),
+          platforms: ['Instagram', 'Facebook'],
+        })
+      }
+      setDayOverrides({})
+      setFreyaNote('Freya sketched 5 local drafts for your week. Review them under Posts → Drafts.')
+      setView('week')
+      setFocusDay(TODAY)
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Couldn’t plan the week'
+      setFreyaNote(message)
+    } finally {
+      setPlanning(false)
+    }
   }
 
   function shiftFocus(delta: number) {
@@ -955,6 +965,7 @@ function ContentCalendar() {
 
   function EventChip({ ev, large }: { ev: CalEvent; large?: boolean }) {
     const dragging = dragId === ev.id
+    const timeLabel = ev.time || eventTime(ev.id)
     return (
       <div
         onPointerDown={(e) => startDrag(ev, e)}
@@ -974,10 +985,10 @@ function ContentCalendar() {
               <div className="min-w-0">
                 <div className="truncate font-bold">{ev.title}</div>
                 <div className="mt-0.5 text-[11px] font-medium opacity-80">
-                  {LABEL[ev.color] || 'Post'} · {eventTime(ev.id)}
+                  {LABEL[ev.color] || 'Post'} · {timeLabel}
                 </div>
               </div>
-              <span className="shrink-0 text-[11px] font-bold opacity-80">{eventTime(ev.id)}</span>
+              <span className="shrink-0 text-[11px] font-bold opacity-80">{timeLabel}</span>
             </div>
           </div>
         ) : (
@@ -1027,7 +1038,7 @@ function ContentCalendar() {
 
   const focusEvents = events
     .filter((e) => e.day === focusDay)
-    .sort((a, b) => eventTime(a.id).localeCompare(eventTime(b.id)))
+    .sort((a, b) => (a.time || eventTime(a.id)).localeCompare(b.time || eventTime(b.id)))
   const focusDate = new Date(YEAR, MONTH, focusDay)
   const focusLabel = focusDate.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -1147,11 +1158,16 @@ function ContentCalendar() {
 
           <button
             type="button"
-            onClick={freyaPlanWeek}
-            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-sky-bright to-sky-bright px-3.5 py-2 text-[12px] font-bold text-white shadow-md shadow-sky/40 hover:brightness-110"
+            onClick={() => void freyaPlanWeek()}
+            disabled={planning}
+            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-sky-bright to-sky-bright px-3.5 py-2 text-[12px] font-bold text-white shadow-md shadow-sky/40 hover:brightness-110 disabled:opacity-70"
           >
-            <Sparkles className="h-3.5 w-3.5" />
-            Freya, plan my week
+            {planning ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {planning ? 'Planning…' : 'Freya, plan my week'}
           </button>
         </div>
       </div>
@@ -1295,7 +1311,7 @@ function ContentCalendar() {
                         {dayEvents.map((ev) => (
                           <div key={ev.id}>
                             <div className="mb-0.5 text-[10px] font-bold text-slate-500">
-                              {eventTime(ev.id)}
+                              {ev.time || eventTime(ev.id)}
                             </div>
                             <EventChip ev={ev} />
                           </div>

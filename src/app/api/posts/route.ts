@@ -64,7 +64,9 @@ export async function GET(req: Request) {
 
     let query = supabase
       .from('content_posts')
-      .select('*, content_post_platforms(platform), content_assets(storage_path, mime_type)')
+      .select(
+        '*, content_post_platforms(platform), content_assets(storage_path, mime_type), content_metric_snapshots(likes, comments, shares, reach, captured_at)',
+      )
       .eq('organization_id', ctx.organizationId)
       .order('created_at', { ascending: false })
 
@@ -109,9 +111,9 @@ export async function POST(req: Request) {
     let status = String(body.status || 'draft')
     let scheduledAt = body.scheduled_at ?? null
     if (!hasConnected || publishablePlatforms.length === 0) {
+      // Keep scheduled_at on drafts as a calendar plan date (not live publish).
       status = 'draft'
-      scheduledAt = null
-    } else if (scheduledAt) {
+    } else if (scheduledAt && status !== 'draft') {
       status = 'scheduled'
     } else if (status !== 'published' && status !== 'scheduled' && status !== 'draft') {
       status = 'draft'
@@ -198,14 +200,14 @@ export async function PATCH(req: Request) {
       if (key in body) patch[key] = body[key]
     }
 
-    const wantsLive =
-      patch.status === 'published' ||
-      patch.status === 'scheduled' ||
-      (patch.scheduled_at != null && patch.scheduled_at !== '')
+    const wantsLiveStatus = patch.status === 'published' || patch.status === 'scheduled'
 
-    if (wantsLive && (!hasConnected || (publishablePlatforms && publishablePlatforms.length === 0))) {
+    if (
+      wantsLiveStatus &&
+      (!hasConnected || (publishablePlatforms && publishablePlatforms.length === 0))
+    ) {
+      // Demote to draft but keep scheduled_at so Content calendar plans stay intact.
       patch.status = 'draft'
-      patch.scheduled_at = null
       delete patch.published_at
     } else if (patch.status === 'published' && !patch.published_at) {
       patch.published_at = new Date().toISOString()

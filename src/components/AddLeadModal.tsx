@@ -1,9 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
+import { FreyaArtifactReview } from './FreyaArtifactReview'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
 import { useApp } from '../context/AppContext'
+import { useFreyaActivity } from '../context/FreyaActivityContext'
 import { useLeads } from '../context/LeadsContext'
 import { useFunnelStages } from '../context/FunnelStagesContext'
+import { buildRevisePrompt } from '@/lib/freyaAskHandoff'
 import { freyaFillLead, type FreyaBizContext } from '../lib/freyaCreationHelpers'
 import type { Lead, LeadPlatform, LeadSource, LeadTemp } from '../data/leadsData'
 
@@ -12,6 +15,7 @@ const QUICK_TAGS = ['Bridal', 'Events', 'Corporate', 'Photoshoot', 'Custom Order
 export function AddLeadModal({ onClose }: { onClose: () => void }) {
   const { addLead } = useLeads()
   const { profile, prefs } = useApp()
+  const { askFreya } = useFreyaActivity()
   const bizCtx: FreyaBizContext = {
     businessName: profile?.businessName,
     industry: profile?.industry,
@@ -21,20 +25,16 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
     tone: prefs.tone,
   }
   const [prompt, setPrompt] = useState('')
-  const [leaveToFreya, setLeaveToFreya] = useState(false)
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
+  const email = ''
   const [company, setCompany] = useState('')
   const [note, setNote] = useState('')
   const [tags, setTags] = useState<string[]>(['Local'])
+  const [freyaDrafted, setFreyaDrafted] = useState(false)
   const [applying, setApplying] = useState(false)
   const [building, setBuilding] = useState(false)
 
-  function toggleTag(tag: string) {
-    setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
-  }
-
-  function applySemiAuto() {
+  function runFreyaFill() {
     if (!prompt.trim()) return
     setApplying(true)
     window.setTimeout(() => {
@@ -43,36 +43,57 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
       setCompany(filled.company)
       setNote(filled.note)
       setTags(filled.tags)
+      setFreyaDrafted(true)
       setApplying(false)
     }, 550)
   }
 
+  function handoff(section?: string) {
+    askFreya({
+      prompt: buildRevisePrompt({
+        kind: 'lead',
+        section,
+        tone: prefs.tone,
+        fields: {
+          Name: name,
+          Email: email,
+          Company: company,
+          Note: note,
+          Tags: tags.join(', '),
+        },
+      }),
+    })
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault()
-    setBuilding(true)
 
-    const filled = leaveToFreya ? freyaFillLead(prompt, bizCtx) : { name, email, company, note, tags }
-    const leadName = filled.name.trim()
-    if (!leadName) {
-      setBuilding(false)
+    if (!freyaDrafted && prompt.trim()) {
+      runFreyaFill()
       return
     }
 
+    const leadName = name.trim()
+    if (!leadName || !freyaDrafted) {
+      return
+    }
+
+    setBuilding(true)
     window.setTimeout(() => {
       addLead({
         name: leadName,
-        email: email.trim() || filled.email || `${leadName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
-        company: company.trim() || filled.company,
-        note: note.trim() || filled.note,
-        tags: tags.length ? tags : filled.tags,
+        email: email.trim() || `${leadName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+        company: company.trim() || '—',
+        note: note.trim() || 'New lead added via Freya',
+        tags: tags.length ? tags : ['Local'],
         temp: 'warm',
       })
       setBuilding(false)
       onClose()
-    }, leaveToFreya ? 600 : 0)
+    }, 400)
   }
 
-  const canSubmit = leaveToFreya || name.trim().length > 0
+  const canSubmit = freyaDrafted && name.trim().length > 0
   const busy = applying || building
 
   return (
@@ -81,7 +102,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <div>
             <h2 className="text-[18px] font-bold text-ink">Add person</h2>
-            <p className="text-[12px] text-muted">Describe who they are — or let Freya figure it out</p>
+            <p className="text-[12px] text-muted">Describe who they are — Freya drafts the details</p>
           </div>
           <button
             type="button"
@@ -96,87 +117,33 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
           <FreyaCreationAssist
             prompt={prompt}
             onPromptChange={setPrompt}
-            leaveToFreya={leaveToFreya}
-            onLeaveToFreyaChange={setLeaveToFreya}
-            onApplyPrompt={applySemiAuto}
+            onApplyPrompt={runFreyaFill}
             applying={applying}
             disabled={busy}
-            applyLabel="Freya, fill this from my prompt"
+            applyLabel="Freya, draft person from prompt"
             placeholder="e.g. Bridal inquiry from Instagram — wants a custom lehenga for September"
           />
 
-          {leaveToFreya ? (
-            <div className="rounded-xl border border-dashed border-sky/30 bg-sky-soft/40 px-4 py-4 text-center">
-              <p className="text-[13px] font-semibold text-ink">Full auto mode</p>
-              <p className="mt-1 text-[12px] text-muted">Freya adds the person and queues a hello message.</p>
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-ink">Full name</label>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required={!leaveToFreya}
-                  autoFocus
-                  placeholder="e.g. Sarah Chen"
-                  className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-ink">Email</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="sarah@example.com"
-                  className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-ink">
-                  Company <span className="font-normal text-muted">(optional)</span>
-                </label>
-                <input
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="Company name"
-                  className="h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-ink">
-                  What&apos;s this about?
-                </label>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  rows={3}
-                  placeholder="A short note Freya can use in the hello message…"
-                  className="w-full resize-none rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-[13px] font-semibold text-ink">Tags</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {QUICK_TAGS.map((tag) => {
-                    const on = tags.includes(tag)
-                    return (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => toggleTag(tag)}
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                          on ? 'bg-sky text-white' : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {tag}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
+          {!freyaDrafted && !applying && (
+            <p className="rounded-xl border border-dashed border-sky/30 bg-sky-soft/30 px-4 py-3 text-[12px] text-muted">
+              Add a prompt and tap the arrow — Freya will draft the person for review.
+            </p>
+          )}
+
+          {freyaDrafted && (
+            <FreyaArtifactReview
+              fields={[
+                { key: 'name', label: 'Full name', value: name },
+                { key: 'email', label: 'Email', value: email },
+                { key: 'company', label: 'Company', value: company },
+                { key: 'note', label: 'About', value: note },
+                { key: 'tags', label: 'Tags', value: tags.join(', ') },
+              ]}
+              onAskFreya={() => handoff()}
+              onAskFreyaField={(_key, label) => handoff(label.toLowerCase())}
+              onRegenerate={runFreyaFill}
+              regenerating={applying}
+            />
           )}
 
           <button
@@ -184,11 +151,7 @@ export function AddLeadModal({ onClose }: { onClose: () => void }) {
             disabled={!canSubmit || busy}
             className="flex h-12 w-full items-center justify-center rounded-full bg-sky text-[14px] font-bold text-white hover:bg-sky-bright disabled:bg-sky-muted"
           >
-            {building
-              ? 'Freya is on it…'
-              : leaveToFreya
-                ? 'Let Freya add this person'
-                : 'Add person & let Freya draft a hello'}
+            {building ? 'Freya is on it…' : 'Add person & let Freya draft a hello'}
           </button>
         </form>
       </div>
