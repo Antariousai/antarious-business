@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireOrgContext, jsonError } from '@/lib/org/context'
+import { resolveStalePublishPostActivities } from '@/lib/freya/resolvePublishActivities'
 
 export const runtime = 'nodejs'
 
@@ -20,7 +21,23 @@ export async function GET(req: Request) {
 
     const { data, error } = await query
     if (error) throw error
-    return Response.json({ items: data ?? [] })
+
+    const rows = data ?? []
+    const resolvedIds = await resolveStalePublishPostActivities(
+      supabase,
+      ctx.organizationId,
+      rows,
+    )
+    const items =
+      resolvedIds.length === 0
+        ? rows
+        : rows.map((row) =>
+            resolvedIds.includes(row.id)
+              ? { ...row, status: 'done', resolved_at: new Date().toISOString() }
+              : row,
+          )
+
+    return Response.json({ items })
   } catch (err) {
     return jsonError(err)
   }

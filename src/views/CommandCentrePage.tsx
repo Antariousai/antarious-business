@@ -982,7 +982,7 @@ function ApprovalCard({ item, onApprove }: { item: FreyaActivityItem; onApprove:
           className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-sky-bright to-sky-bright px-4 py-2 text-[13px] font-bold text-white shadow-md shadow-sky/30 hover:brightness-110"
         >
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
-          Approve
+          Post now
         </button>
       </div>
     </div>

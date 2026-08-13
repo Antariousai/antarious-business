@@ -3,6 +3,7 @@ import { requireOrgContext, jsonError } from '@/lib/org/context'
 import { assertModuleAccess } from '@/lib/entitlements'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { publishContentPostToFacebook } from '@/lib/integrations/meta/publishPagePost'
+import { resolveWaitingPublishPostActivities } from '@/lib/freya/resolvePublishActivities'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -167,6 +168,7 @@ export async function POST(req: Request) {
           { status: 502 },
         )
       }
+      await resolveWaitingPublishPostActivities(supabase, ctx.organizationId, post.id)
     }
 
     const [enriched] = await signAssetUrls(supabase, [
@@ -287,6 +289,7 @@ export async function PATCH(req: Request) {
           { status: 502 },
         )
       }
+      await resolveWaitingPublishPostActivities(supabase, ctx.organizationId, id)
     }
 
     const { data: full } = await supabase

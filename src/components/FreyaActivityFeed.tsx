@@ -223,7 +223,11 @@ function ActivityCard({
                     className="inline-flex items-center gap-1 rounded-full bg-sky px-2.5 py-1 text-[11px] font-bold text-white hover:bg-sky-bright"
                   >
                     <Check className="h-3 w-3" strokeWidth={3} />
-                    Approve
+                    {item.kind === 'post'
+                      ? 'Post now'
+                      : item.kind === 'message'
+                        ? 'Send now'
+                        : 'Approve'}
                   </button>
                   {item.href && (
                     <Link

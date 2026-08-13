@@ -206,10 +206,19 @@ export function ContentPage() {
               <article
                 key={post.id}
                 id={`post-${post.id}`}
-                className={`overflow-hidden rounded-2xl bg-white shadow-sm transition ${
+                role="button"
+                tabIndex={0}
+                onClick={() => setEditingPost(post)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setEditingPost(post)
+                  }
+                }}
+                className={`cursor-pointer overflow-hidden rounded-2xl bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
                   focusPostId === post.id
                     ? 'ring-2 ring-sky shadow-md shadow-sky/20'
-                    : ''
+                    : 'hover:ring-1 hover:ring-sky/30'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2 px-4 pt-4">
@@ -269,15 +278,19 @@ export function ContentPage() {
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setEditingPost(post)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditingPost(post)
+                      }}
                       className="flex h-10 items-center justify-center gap-2 rounded-xl bg-sky-soft text-[13px] font-semibold text-sky hover:bg-sky/20"
                     >
                       <Pencil className="h-4 w-4" />
-                      Edit
+                      {post.status === 'draft' ? 'Review & post' : 'Edit'}
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         void (async () => {
                           const tpl = await saveFromPost(
                             post.caption,

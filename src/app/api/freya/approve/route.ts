@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireOrgContext, jsonError } from '@/lib/org/context'
 import { publishContentPostToFacebook } from '@/lib/integrations/meta/publishPagePost'
+import { resolveWaitingPublishPostActivities } from '@/lib/freya/resolvePublishActivities'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -33,6 +34,8 @@ async function applyPayload(
       .eq('id', payload.post_id)
       .eq('organization_id', organizationId)
     if (error) throw error
+    // Clear duplicate waiting cards for the same post (Approve only marks this row).
+    await resolveWaitingPublishPostActivities(supabase, organizationId, payload.post_id)
     return {
       applied: 'publish_post',
       post_id: payload.post_id,

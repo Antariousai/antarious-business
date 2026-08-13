@@ -273,6 +273,13 @@ function activityKindCard(kind?: string | null): FreyaActivityItem['kind'] {
 export function mapApiActivity(row: ApiActivity): FreyaActivityItem {
   const status = (row.status === 'done' || row.status === 'working' ? row.status : 'waiting') as FreyaActivityStatus
   const kind = row.kind ?? 'generic'
+  const cardKind = activityKindCard(kind)
+  let actionLabel: string | undefined
+  if (status === 'waiting') {
+    if (cardKind === 'post') actionLabel = 'Review in Posts'
+    else if (cardKind === 'message') actionLabel = 'Review in Inbox'
+    else actionLabel = 'Open'
+  }
   return {
     id: row.id,
     title: row.title,
@@ -281,8 +288,8 @@ export function mapApiActivity(row: ApiActivity): FreyaActivityItem {
     area: KIND_TO_AREA[kind] ?? 'content',
     time: formatRelativeTime(row.created_at),
     href: row.href ?? undefined,
-    actionLabel: status === 'waiting' ? 'Approve' : undefined,
-    kind: activityKindCard(kind),
+    actionLabel,
+    kind: cardKind,
     previewBody: row.summary ?? undefined,
   }
 }

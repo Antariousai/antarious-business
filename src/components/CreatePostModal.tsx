@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Film, ImagePlus, Upload, X } from 'lucide-react'
+import { CheckCircle2, ExternalLink, Film, ImagePlus, Upload, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { FreyaArtifactReview } from './FreyaArtifactReview'
 import { FreyaCreationAssist } from './FreyaCreationAssist'
@@ -43,6 +43,22 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
+/** datetime-local value from ISO (or empty). */
+function toLocalDatetimeValue(iso?: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function fromLocalDatetimeValue(local: string): string | undefined {
+  if (!local.trim()) return undefined
+  const d = new Date(local)
+  if (Number.isNaN(d.getTime())) return undefined
+  return d.toISOString()
+}
+
 export function CreatePostModal({
   onClose,
   post,
@@ -59,7 +75,7 @@ export function CreatePostModal({
 }) {
   const { createPost, updatePost } = useContent()
   const { prefs, profile } = useApp()
-  const { askFreya } = useFreyaActivity()
+  const { askFreya, refresh: refreshFreyaActivity } = useFreyaActivity()
   const { backend } = useBackendMode()
   const bizCtx: FreyaBizContext = {
     businessName: profile?.businessName,
@@ -84,7 +100,7 @@ export function CreatePostModal({
   })
   const [caption, setCaption] = useState(post?.caption ?? initialCaption)
   const [tag, setTag] = useState(post?.tag ?? 'Food')
-  const [schedule] = useState(post?.scheduledAt ?? '')
+  const [schedule, setSchedule] = useState(() => toLocalDatetimeValue(post?.scheduledAt))
   const [uploads, setUploads] = useState<UploadedFile[]>(
     post?.image
       ? [{ id: 'existing', url: post.image, name: 'Current media', kind: 'image' as const }]
@@ -95,6 +111,9 @@ export function CreatePostModal({
   const [building, setBuilding] = useState(false)
   const [mediaError, setMediaError] = useState<string | null>(null)
   const [mediaChanged, setMediaChanged] = useState(false)
+  const [publishSuccess, setPublishSuccess] = useState<{
+    permalink: string | null
+  } | null>(null)
 
   uploadsRef.current = uploads
 
@@ -214,13 +233,13 @@ export function CreatePostModal({
       tag,
       image,
       status,
-      scheduledAt: schedule || undefined,
+      scheduledAt: fromLocalDatetimeValue(schedule),
       author: post?.author ?? 'You',
       assets,
     }
   }
 
-  async function handleSubmit(action: 'save' | 'publish') {
+  async function handleSubmit(action: 'save' | 'schedule' | 'publish') {
     if (!freyaDrafted && prompt.trim()) {
       runFreyaFill()
       return
@@ -232,16 +251,20 @@ export function CreatePostModal({
     if (!hasConnectedPlatform) {
       status = 'draft'
       republish = false
-    } else if (isEdit && post) {
-      if (action === 'publish') {
-        status = schedule ? 'scheduled' : 'published'
-        republish = true
-      } else {
-        status = post.status === 'published' || post.status === 'scheduled' ? post.status : 'draft'
+    } else if (action === 'schedule') {
+      if (!fromLocalDatetimeValue(schedule)) {
+        setMediaError('Pick a date and time to schedule.')
+        return
       }
+      status = 'scheduled'
+      republish = true
+    } else if (action === 'publish') {
+      status = 'published'
+      republish = true
+    } else if (isEdit && post) {
+      status = post.status === 'published' || post.status === 'scheduled' ? post.status : 'draft'
     } else {
-      status = action === 'save' ? 'draft' : schedule ? 'scheduled' : 'published'
-      republish = action === 'publish'
+      status = 'draft'
     }
 
     const publishPlatforms =
@@ -252,6 +275,8 @@ export function CreatePostModal({
     if (status !== 'draft' && publishPlatforms.length === 0) {
       status = 'draft'
       republish = false
+      setMediaError('Connect a channel in Settings before scheduling or posting.')
+      return
     }
 
     setBuilding(true)
@@ -267,13 +292,25 @@ export function CreatePostModal({
           : (['Facebook', 'Instagram'] as Platform[])
       input.platforms = plats
       if (status === 'draft') {
+        input.scheduledAt = fromLocalDatetimeValue(schedule)
+      } else if (status === 'scheduled') {
+        input.scheduledAt = fromLocalDatetimeValue(schedule)
+      } else if (status === 'published') {
         input.scheduledAt = undefined
       }
-      if (isEdit && post) {
-        await updatePost(post.id, input, { republish })
-      } else {
-        await createPost(input)
+      const result =
+        isEdit && post
+          ? await updatePost(post.id, input, { republish })
+          : await createPost(input)
+
+      if (status === 'published') {
+        void refreshFreyaActivity().catch(() => {})
+        setPublishSuccess({
+          permalink: result?.publishMeta?.permalink ?? null,
+        })
+        return
       }
+      void refreshFreyaActivity().catch(() => {})
       onClose()
     } catch (err) {
       setMediaError(err instanceof Error ? err.message : 'Could not save draft. Try again.')
@@ -284,25 +321,64 @@ export function CreatePostModal({
 
   const busy = applying || building
   const hasCaption = caption.trim().length > 0
-  const hasMedia = uploads.length > 0
   const canSave = hasCaption && freyaDrafted
   const selectedConnected = platforms.filter((p) => connectedPlatforms.includes(p))
-  const canPublish =
-    hasConnectedPlatform &&
-    selectedConnected.length > 0 &&
-    hasCaption &&
-    hasMedia &&
-    freyaDrafted
+  const canGoLive =
+    hasConnectedPlatform && selectedConnected.length > 0 && hasCaption && freyaDrafted
+  const canSchedule = canGoLive && Boolean(fromLocalDatetimeValue(schedule))
+  const canPublish = canGoLive
   const isLivePost = post?.status === 'published' || post?.status === 'scheduled'
+  const scheduleLabel = isLivePost && post?.status === 'scheduled' ? 'Update schedule' : 'Schedule'
   const publishLabel = !hasConnectedPlatform
-    ? 'Connect a channel to publish'
-    : schedule
-      ? isLivePost
-        ? 'Reschedule post'
-        : 'Schedule post'
-      : isLivePost
-        ? 'Republish Now'
-        : 'Publish Now'
+    ? 'Connect a channel to post'
+    : isLivePost && post?.status === 'published'
+      ? 'Republish now'
+      : 'Post now'
+
+  if (publishSuccess) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Post published"
+          className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl"
+        >
+          <div className="flex flex-col items-center text-center">
+            <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <CheckCircle2 className="h-8 w-8" strokeWidth={2} />
+            </span>
+            <h2 className="text-[18px] font-bold text-ink">Post published</h2>
+            <p className="mt-2 text-[13px] leading-relaxed text-muted">
+              Your post is live on your Facebook Page.
+            </p>
+            {publishSuccess.permalink ? (
+              <a
+                href={publishSuccess.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full bg-sky px-5 py-2.5 text-[13px] font-bold text-white hover:bg-sky-bright"
+              >
+                <ExternalLink className="h-4 w-4" />
+                View on Facebook
+              </a>
+            ) : (
+              <p className="mt-4 text-[12px] text-muted">
+                Open your Facebook Page to see it in the feed.
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-3 w-full rounded-full border border-slate-200 px-5 py-2.5 text-[13px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
@@ -344,7 +420,8 @@ export function CreatePostModal({
               Upload media <span className="font-normal text-muted">(images, GIFs, or video)</span>
             </label>
             <p className="mb-3 text-[12px] text-muted">
-              Tap below to choose files from your device. Required to publish; optional for drafts.
+              Tap below to choose files from your device. Optional for drafts and text posts;
+              recommended for feed posts.
             </p>
 
             <input
@@ -476,7 +553,29 @@ export function CreatePostModal({
                 {
                   key: 'schedule',
                   label: 'Schedule',
-                  value: schedule || 'Publish when ready',
+                  value: schedule
+                    ? new Date(schedule).toLocaleString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : 'Publish when ready',
+                  children: (
+                    <div className="mt-2">
+                      <input
+                        type="datetime-local"
+                        value={schedule}
+                        onChange={(e) => setSchedule(e.target.value)}
+                        disabled={busy}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] text-ink outline-none focus:border-sky focus:ring-2 focus:ring-sky/20"
+                      />
+                      <p className="mt-1.5 text-[11px] text-muted">
+                        Optional — set a time then tap Schedule, or leave blank and Post now.
+                      </p>
+                    </div>
+                  ),
                 },
               ]}
               onAskFreya={() => handoff()}
@@ -501,7 +600,15 @@ export function CreatePostModal({
             disabled={!canSave || busy}
             className="rounded-full border border-sky/40 bg-white px-5 py-2.5 text-[13px] font-bold text-sky hover:bg-sky-soft disabled:border-slate-200 disabled:text-slate-400"
           >
-            {building ? 'Saving…' : isEdit ? 'Save changes' : 'Save draft'}
+            {building ? 'Saving…' : 'Save draft'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSubmit('schedule')}
+            disabled={!canSchedule || busy}
+            className="rounded-full border border-amber-300 bg-amber-50 px-5 py-2.5 text-[13px] font-bold text-amber-800 hover:bg-amber-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {building ? 'Scheduling…' : scheduleLabel}
           </button>
           <button
             type="button"
@@ -509,7 +616,7 @@ export function CreatePostModal({
             disabled={!canPublish || busy}
             className="rounded-full bg-sky px-5 py-2.5 text-[13px] font-bold text-white hover:bg-sky-bright disabled:bg-sky-muted"
           >
-            {building ? (isLivePost ? 'Republishing…' : 'Publishing…') : publishLabel}
+            {building ? 'Posting…' : publishLabel}
           </button>
         </div>
       </div>

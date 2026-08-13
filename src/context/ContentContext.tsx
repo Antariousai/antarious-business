@@ -50,15 +50,25 @@ export type SavePostInput = {
   assets?: { path: string; mimeType?: string; url?: string }[]
 }
 
+export type PublishMeta = {
+  permalink: string | null
+  providerPostId?: string
+}
+
+export type SavePostResult = {
+  post: ContentPost
+  publishMeta?: PublishMeta
+}
+
 interface ContentContextValue {
   posts: ContentPost[]
   loading: boolean
-  createPost: (input: SavePostInput) => ContentPost | Promise<ContentPost>
+  createPost: (input: SavePostInput) => Promise<SavePostResult>
   updatePost: (
     id: string,
     input: Partial<SavePostInput>,
     options?: { republish?: boolean },
-  ) => ContentPost | undefined | Promise<ContentPost | undefined>
+  ) => Promise<SavePostResult | undefined>
   resetPosts: () => void
   refresh: () => Promise<void>
 }
@@ -130,11 +140,14 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const createPost = useCallback(
-    async (input: SavePostInput): Promise<ContentPost> => {
+    async (input: SavePostInput): Promise<SavePostResult> => {
       if (backend) {
         const platforms =
           input.platforms?.length > 0 ? input.platforms : (['Facebook', 'Instagram'] as Platform[])
-        const data = await apiFetch<{ post: Parameters<typeof mapApiPost>[0] }>('/api/posts', {
+        const data = await apiFetch<{
+          post: Parameters<typeof mapApiPost>[0]
+          meta?: { permalink?: string | null; providerPostId?: string }
+        }>('/api/posts', {
           method: 'POST',
           body: JSON.stringify({
             caption: input.caption,
@@ -163,7 +176,16 @@ export function ContentProvider({ children }: { children: ReactNode }) {
           if (prev.some((p) => p.id === mapped.id)) return prev
           return [mapped, ...prev]
         })
-        return mapped
+        return {
+          post: mapped,
+          publishMeta:
+            data.meta?.permalink || data.meta?.providerPostId
+              ? {
+                  permalink: data.meta.permalink ?? null,
+                  providerPostId: data.meta.providerPostId,
+                }
+              : undefined,
+        }
       }
 
       const post: ContentPost = {
@@ -183,7 +205,7 @@ export function ContentProvider({ children }: { children: ReactNode }) {
         shares: 0,
       }
       persistLocal([post, ...posts])
-      return post
+      return { post }
     },
     [backend, persistLocal, posts, refresh],
   )
@@ -193,9 +215,12 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       id: string,
       input: Partial<SavePostInput>,
       options?: { republish?: boolean },
-    ): Promise<ContentPost | undefined> => {
+    ): Promise<SavePostResult | undefined> => {
       if (backend) {
-        const data = await apiFetch<{ post: Parameters<typeof mapApiPost>[0] }>('/api/posts', {
+        const data = await apiFetch<{
+          post: Parameters<typeof mapApiPost>[0]
+          meta?: { permalink?: string | null; providerPostId?: string }
+        }>('/api/posts', {
           method: 'PATCH',
           body: JSON.stringify({
             id,
@@ -233,7 +258,16 @@ export function ContentProvider({ children }: { children: ReactNode }) {
           if (!next.some((p) => p.id === id)) return [mapped, ...next]
           return next
         })
-        return mapped
+        return {
+          post: mapped,
+          publishMeta:
+            data.meta?.permalink || data.meta?.providerPostId
+              ? {
+                  permalink: data.meta.permalink ?? null,
+                  providerPostId: data.meta.providerPostId,
+                }
+              : undefined,
+        }
       }
 
       let updated: ContentPost | undefined
@@ -253,7 +287,7 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       })
       if (!updated) return undefined
       persistLocal(next)
-      return updated
+      return { post: updated }
     },
     [backend, persistLocal, posts, refresh],
   )
