@@ -1,7 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireOrgContext, jsonError } from '@/lib/org/context'
+import { publishContentPostToFacebook } from '@/lib/integrations/meta/publishPagePost'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 type Payload = {
   action?: string
@@ -18,6 +20,10 @@ async function applyPayload(
 ) {
   const action = payload.action
   if (action === 'publish_post' && payload.post_id) {
+    const meta = await publishContentPostToFacebook(supabase, organizationId, payload.post_id)
+    if (!meta.ok) {
+      throw new Error(meta.userMessage)
+    }
     const { error } = await supabase
       .from('content_posts')
       .update({
@@ -27,7 +33,12 @@ async function applyPayload(
       .eq('id', payload.post_id)
       .eq('organization_id', organizationId)
     if (error) throw error
-    return { applied: 'publish_post', post_id: payload.post_id }
+    return {
+      applied: 'publish_post',
+      post_id: payload.post_id,
+      providerPostId: meta.providerPostId,
+      permalink: meta.permalink,
+    }
   }
 
   if (action === 'send_inbox_draft' && payload.message_id) {

@@ -77,4 +77,6 @@ Supabase → **Authentication → URL configuration**:
 | Invalid OAuth state | Cookie blocked / different domain — use `app.antarious.com` with matching `NEXT_PUBLIC_APP_URL` |
 | Plan allows N channels | Disconnect a channel or upgrade (Starter = 2) |
 
-Publish-to-feed and inbox webhooks are not wired yet; this flow stores Page tokens for the next build step.
+Publish-to-feed: when a post is set to **published**, Antarious calls Meta Graph
+(`/{page-id}/feed` or `/{page-id}/photos`) with the stored Page token so it appears
+on the connected **Facebook Page** (not a personal profile).

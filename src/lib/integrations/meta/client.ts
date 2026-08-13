@@ -134,6 +134,53 @@ export async function metaGraphPost<T = unknown>(
   return json as T
 }
 
+/** Form-urlencoded POST — preferred for Page /feed and /photos. */
+export async function metaGraphPostForm<T = unknown>(
+  path: string,
+  accessToken: string,
+  fields: Record<string, string>,
+  opts?: { host?: MetaGraphHost },
+): Promise<T> {
+  const host = opts?.host ?? 'facebook'
+  const url = new URL(`${baseUrl(host)}${path.startsWith('/') ? path : `/${path}`}`)
+  const body = new URLSearchParams({ ...fields, access_token: accessToken })
+
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+    signal: AbortSignal.timeout(60_000),
+  })
+  const json = (await res.json().catch(() => ({}))) as {
+    error?: { message?: string; code?: number; type?: string; fbtrace_id?: string }
+  }
+  if (!res.ok || json.error) {
+    const err = new MetaApiError(
+      json.error?.message || `Meta POST failed (${res.status})`,
+      res.status,
+      json.error?.code,
+      json.error?.type,
+      json.error?.fbtrace_id,
+    )
+    console.error(
+      JSON.stringify({
+        event: 'meta.api.error',
+        method: 'POST_FORM',
+        path: url.pathname,
+        status: res.status,
+        code: err.code,
+        message: err.message,
+        fbtrace: err.fbtraceId,
+      }),
+    )
+    throw err
+  }
+  return json as T
+}
+
 export function verifyMetaWebhookSignature(rawBody: string, signatureHeader: string | null): boolean {
   if (!signatureHeader?.startsWith('sha256=')) return false
   const secret = metaAppSecret()

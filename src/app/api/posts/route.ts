@@ -2,8 +2,10 @@ import { createClient } from '@/lib/supabase/server'
 import { requireOrgContext, jsonError } from '@/lib/org/context'
 import { assertModuleAccess } from '@/lib/entitlements'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { publishContentPostToFacebook } from '@/lib/integrations/meta/publishPagePost'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 type AssetRow = { storage_path: string; mime_type?: string | null }
 
@@ -147,9 +149,30 @@ export async function POST(req: Request) {
       await attachAssets(supabase, ctx.organizationId, post.id, assets)
     }
 
+    let metaPublish: Awaited<ReturnType<typeof publishContentPostToFacebook>> | null = null
+    if (post && status === 'published') {
+      metaPublish = await publishContentPostToFacebook(supabase, ctx.organizationId, post.id)
+      if (!metaPublish.ok) {
+        await supabase
+          .from('content_posts')
+          .update({ status: 'draft', published_at: null })
+          .eq('id', post.id)
+          .eq('organization_id', ctx.organizationId)
+        return Response.json(
+          {
+            error: metaPublish.userMessage,
+            code: 'META_PUBLISH',
+            detail: metaPublish.error,
+          },
+          { status: 502 },
+        )
+      }
+    }
+
     const [enriched] = await signAssetUrls(supabase, [
       {
         ...post,
+        status: status === 'published' && metaPublish?.ok ? 'published' : post.status,
         content_post_platforms: platformsToStore.map((platform) => ({ platform })),
         content_assets: assets.map((a) => ({
           storage_path: a.path,
@@ -158,7 +181,15 @@ export async function POST(req: Request) {
       },
     ])
 
-    return Response.json({ post: enriched }, { status: 201 })
+    return Response.json(
+      {
+        post: enriched,
+        meta: metaPublish?.ok
+          ? { providerPostId: metaPublish.providerPostId, permalink: metaPublish.permalink }
+          : undefined,
+      },
+      { status: 201 },
+    )
   } catch (err) {
     return jsonError(err)
   }
@@ -238,6 +269,26 @@ export async function PATCH(req: Request) {
       await attachAssets(supabase, ctx.organizationId, id, assets)
     }
 
+    let metaPublish: Awaited<ReturnType<typeof publishContentPostToFacebook>> | null = null
+    if (patch.status === 'published') {
+      metaPublish = await publishContentPostToFacebook(supabase, ctx.organizationId, id)
+      if (!metaPublish.ok) {
+        await supabase
+          .from('content_posts')
+          .update({ status: 'draft', published_at: null })
+          .eq('id', id)
+          .eq('organization_id', ctx.organizationId)
+        return Response.json(
+          {
+            error: metaPublish.userMessage,
+            code: 'META_PUBLISH',
+            detail: metaPublish.error,
+          },
+          { status: 502 },
+        )
+      }
+    }
+
     const { data: full } = await supabase
       .from('content_posts')
       .select('*, content_post_platforms(platform), content_assets(storage_path, mime_type)')
@@ -246,7 +297,12 @@ export async function PATCH(req: Request) {
 
     const [enriched] = await signAssetUrls(supabase, full ? [full] : [{ ...data, content_assets: [] }])
 
-    return Response.json({ post: enriched })
+    return Response.json({
+      post: enriched,
+      meta: metaPublish?.ok
+        ? { providerPostId: metaPublish.providerPostId, permalink: metaPublish.permalink }
+        : undefined,
+    })
   } catch (err) {
     return jsonError(err)
   }
